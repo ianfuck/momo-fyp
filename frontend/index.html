@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Momo 控制面板</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div id="app">
+      <header>
+        <h1>Momo</h1>
+        <p class="subtitle">鎖定 / 閒置 · SG90 · Ollama · TTS</p>
+      </header>
+
+      <section class="panel collapsible">
+        <h2>參數說明</h2>
+        <p>
+          主判斷為 bbox 度量與 threshold；時間參數用於防抖與 foolproof。
+          權重會下載到 <code>model/</code>。Few-shot 來自 <code>resource/example</code> 勾選的
+          CSV。
+        </p>
+      </section>
+
+      <div class="grid">
+        <section class="panel">
+          <h2>即時畫面</h2>
+          <img id="mjpeg" src="/api/stream/mjpeg" alt="camera" />
+        </section>
+
+        <section class="panel">
+          <h2>狀態</h2>
+          <div id="generating-banner" class="generating-banner" aria-live="polite" hidden></div>
+          <div id="pipeline-status" class="pipeline-banner" aria-live="polite"></div>
+          <div id="gpu-metrics" class="gpu-metrics" aria-live="polite"></div>
+          <table id="state-table">
+            <tbody></tbody>
+          </table>
+          <h3>History（每輪最多 10 句，round_reset 清空）</h3>
+          <ul id="history"></ul>
+        </section>
+      </div>
+
+      <section class="panel">
+        <h2>參數</h2>
+        <form id="cfg-form"></form>
+        <button type="button" id="btn-update" class="primary">Update</button>
+        <button type="button" id="btn-defaults">重設預設</button>
+      </section>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

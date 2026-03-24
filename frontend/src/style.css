@@ -1,0 +1,196 @@
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  font-family: system-ui, sans-serif;
+  background: #0f1114;
+  color: #e8eaed;
+}
+header {
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid #333;
+}
+.subtitle {
+  opacity: 0.75;
+  margin: 0.25rem 0 0;
+}
+#app {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding-bottom: 2rem;
+}
+.panel {
+  background: #1a1d23;
+  border: 1px solid #2a2f38;
+  border-radius: 8px;
+  padding: 1rem 1.25rem;
+  margin: 1rem 1.5rem;
+}
+.grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0;
+}
+@media (max-width: 900px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+}
+.pipeline-banner {
+  margin-bottom: 0.85rem;
+  padding: 0.65rem 0.75rem;
+  background: #12161c;
+  border: 1px solid #2d3a4d;
+  border-radius: 6px;
+  font-size: 0.95rem;
+  line-height: 1.45;
+}
+.pipeline-banner strong {
+  color: #9ecbff;
+  font-weight: 600;
+}
+.pipeline-banner .step {
+  display: inline-block;
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+}
+.pipeline-banner .step.done {
+  color: #81c995;
+}
+.pipeline-banner .step.active {
+  background: #264061;
+  color: #e8f4ff;
+  font-weight: 600;
+}
+.pipeline-banner .step.wait {
+  opacity: 0.45;
+}
+.pipeline-banner .arrow {
+  margin: 0 0.2rem;
+  opacity: 0.55;
+}
+.pipeline-hint {
+  margin: 0.4rem 0 0;
+  font-size: 0.82rem;
+  opacity: 0.72;
+}
+.generating-banner {
+  margin-bottom: 0.65rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  border: 1px solid #5c4030;
+  background: linear-gradient(90deg, #3d2818 0%, #2a1f18 100%);
+  color: #ffcc80;
+}
+.gpu-metrics {
+  margin-bottom: 0.85rem;
+  padding: 0.55rem 0.7rem;
+  background: #12161c;
+  border: 1px solid #2a3340;
+  border-radius: 6px;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  color: #c5cad3;
+}
+.gpu-metrics .gpu-title {
+  font-weight: 600;
+  color: #9ecbff;
+  margin-bottom: 0.35rem;
+}
+.gpu-metrics .gpu-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1rem;
+}
+.gpu-metrics .gpu-kv {
+  opacity: 0.95;
+}
+.gpu-metrics .gpu-note {
+  margin-top: 0.4rem;
+  font-size: 0.78rem;
+  opacity: 0.65;
+}
+#mjpeg {
+  width: 100%;
+  max-width: 640px;
+  background: #000;
+  border-radius: 4px;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+td {
+  padding: 0.35rem 0.5rem;
+  border-bottom: 1px solid #2a2f38;
+}
+td:first-child {
+  opacity: 0.8;
+  width: 42%;
+}
+.field {
+  margin-bottom: 1rem;
+}
+.field label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+}
+.field .help {
+  font-size: 0.85rem;
+  opacity: 0.75;
+  margin: 0.25rem 0;
+}
+.field input[type="text"],
+.field input[type="number"],
+.field select {
+  width: 100%;
+  max-width: 32rem;
+  padding: 0.4rem 0.5rem;
+  background: #0f1114;
+  border: 1px solid #444;
+  color: inherit;
+  border-radius: 4px;
+}
+.check-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.check-grid label {
+  font-weight: normal;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+button.primary {
+  margin: 0.5rem 1.5rem 0 0;
+  padding: 0.5rem 1.25rem;
+  background: #3b5bdb;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+button#btn-defaults {
+  padding: 0.5rem 1rem;
+  background: #333;
+  color: #eee;
+  border: 1px solid #555;
+  border-radius: 6px;
+  cursor: pointer;
+}
+#history {
+  max-height: 200px;
+  overflow-y: auto;
+  font-size: 0.9rem;
+  opacity: 0.9;
+}
+code {
+  background: #2a2f38;
+  padding: 0.1em 0.35em;
+  border-radius: 3px;
+}
