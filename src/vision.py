@@ -32,6 +32,7 @@ class VisionEngine:
         self.weights_relative = weights_relative
         self.model: Any = None
         self._device = _yolo_torch_device()
+        self._infer_count = 0
         self._load_model()
         logger.info("YOLO 推理裝置：%s", self._device)
 
@@ -67,22 +68,42 @@ class VisionEngine:
         bbox_metric: str,
         frame_area: float,
     ) -> VisionSnapshot:
+        import torch
+
         h, w = frame_bgr.shape[:2]
-        results = self.model(
-            frame_bgr, verbose=False, classes=[0], device=self._device
-        )
+        self._infer_count += 1
+        # stream=True + 耗盡 generator：避免非串流模式在長時間執行時堆疊中繼張量（見 ultralytics STREAM_WARNING）。
+        r_last: Any = None
+        with torch.inference_mode():
+            for r_last in self.model.predict(
+                source=frame_bgr,
+                stream=True,
+                verbose=False,
+                classes=[0],
+                device=self._device,
+            ):
+                pass
+
         best: tuple[int, int, int, int] | None = None
         best_area = 0.0
 
-        if results and results[0].boxes is not None and len(results[0].boxes):
-            boxes = results[0].boxes.xyxy.cpu().numpy()
-            for b in boxes:
-                x1, y1, x2, y2 = map(int, b[:4])
-                bw, bh = max(1, x2 - x1), max(1, y2 - y1)
-                area = float(bw * bh)
-                if area > best_area:
-                    best_area = area
-                    best = (x1, y1, bw, bh)
+        try:
+            if r_last is not None and r_last.boxes is not None and len(r_last.boxes):
+                boxes = r_last.boxes.xyxy.detach().cpu().numpy()
+                for b in boxes:
+                    x1, y1, x2, y2 = map(int, b[:4])
+                    bw, bh = max(1, x2 - x1), max(1, y2 - y1)
+                    area = float(bw * bh)
+                    if area > best_area:
+                        best_area = area
+                        best = (x1, y1, bw, bh)
+        finally:
+            del r_last
+            if self._infer_count % 200 == 0:
+                if self._device == "mps":
+                    torch.mps.empty_cache()
+                elif self._device.startswith("cuda"):
+                    torch.cuda.empty_cache()
 
         if best is None:
             gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)

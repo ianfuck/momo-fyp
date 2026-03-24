@@ -227,8 +227,24 @@ function renderGpuMetrics(payload) {
       ? `<div class="gpu-row">${rows.join("")}</div>`
       : `<div class="gpu-row"><span class="gpu-kv">尚無 GPU 計量（見下方說明）</span></div>`;
   const noteHtml = note ? `<p class="gpu-note">${note}</p>` : "";
+  const cw = Number(payload.capture_width) || 0;
+  const ch = Number(payload.capture_height) || 0;
+  const cfps = Number(payload.capture_fps);
+  const tgtFps =
+    typeof payload.capture_target_fps === "number" && Number.isFinite(payload.capture_target_fps)
+      ? payload.capture_target_fps.toFixed(1)
+      : "—";
+  const tw = Number(payload.capture_frame_width) || 0;
+  const th = Number(payload.capture_frame_height) || 0;
+  const tgtRes = tw > 0 && th > 0 ? `${tw}×${th}` : "—";
+  const actLine =
+    cw > 0 && ch > 0
+      ? `${cfps >= 0 && Number.isFinite(cfps) ? cfps.toFixed(1) : "—"} fps · ${cw}×${ch}`
+      : "—";
+  const capLine = `目標 ${tgtFps} fps、${tgtRes} · 實測 ${actLine}`;
   el.innerHTML = `<div class="gpu-title">運算 / GPU</div>
-    <div class="gpu-row"><span class="gpu-kv"><strong>YOLO 裝置</strong>：${vd}</span>
+    <div class="gpu-row"><span class="gpu-kv"><strong>相機擷取</strong>：${capLine}</span>
+    <span class="gpu-kv"><strong>YOLO 裝置</strong>：${vd}</span>
     <span class="gpu-kv"><strong>資料來源</strong>：${src}</span></div>
     ${inner}
     ${noteHtml}`;
@@ -315,6 +331,23 @@ function renderState(payload) {
     ["tts_backend", payload.tts_backend],
     ["behavior_tags", (payload.behavior_tags || []).join(", ")],
     ["vision_device", payload.vision_device],
+    [
+      "capture_target_fps（UI 參數）",
+      typeof payload.capture_target_fps === "number" && Number.isFinite(payload.capture_target_fps)
+        ? payload.capture_target_fps.toFixed(1)
+        : "—",
+    ],
+    [
+      "capture_frame_width / height（UI 參數）",
+      `${payload.capture_frame_width ?? "—"} × ${payload.capture_frame_height ?? "—"}`,
+    ],
+    [
+      "capture_fps（實測）",
+      typeof payload.capture_fps === "number" && Number.isFinite(payload.capture_fps)
+        ? payload.capture_fps.toFixed(1)
+        : "—",
+    ],
+    ["capture_size（實測）", `${payload.capture_width ?? 0}×${payload.capture_height ?? 0}`],
     ["gpu_metrics", JSON.stringify(payload.gpu_metrics || {})],
   ];
   for (const [k, v] of rows) {

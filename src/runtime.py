@@ -69,6 +69,12 @@ class PublicState:
     behavior_tags: list[str] = field(default_factory=list)
     vision_device: str = ""
     gpu_metrics: dict[str, Any] = field(default_factory=dict)
+    capture_fps: float = 0.0
+    capture_width: int = 0
+    capture_height: int = 0
+    capture_target_fps: float = 15.0
+    capture_frame_width: int = 640
+    capture_frame_height: int = 480
 
 
 class Orchestrator:
@@ -99,6 +105,8 @@ class Orchestrator:
 
         self._running = False
         self._threads: list[threading.Thread] = []
+        self._capture_fps_count = 0
+        self._capture_fps_window_t0 = 0.0
 
     def _reset_speech_pipeline_public(self) -> None:
         self.public.speech_phase = "idle"
@@ -120,7 +128,10 @@ class Orchestrator:
                 self.vision.reload_weights(self._cfg.yolo_weights_path)
             if "serial_port" in patch or "serial_baud" in patch:
                 self.serial.connect(self._cfg.serial_port, self._cfg.serial_baud)
-            if "camera_index" in patch:
+            if any(
+                k in patch
+                for k in ("camera_index", "capture_frame_width", "capture_frame_height")
+            ):
                 self._camera_reopen_requested = True
             if any(
                 k in patch
@@ -183,7 +194,7 @@ class Orchestrator:
     def _ollama_preload_worker(self) -> None:
         try:
             with self._lock:
-                cfg = self._cfg.model_copy(deep=True)
+                cfg = self._cfg.model_copy(deep=False)
             preload_ollama_model(
                 base_url=cfg.ollama_base_url,
                 model=cfg.ollama_model,
@@ -219,9 +230,13 @@ class Orchestrator:
             self._cap.release()
         with self._lock:
             idx = self._cfg.camera_index
+            fw = int(self._cfg.capture_frame_width)
+            fh = int(self._cfg.capture_frame_height)
+        fw = max(160, min(3840, fw))
+        fh = max(120, min(2160, fh))
         self._cap = cv2.VideoCapture(idx)
-        self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-        self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        self._cap.set(cv2.CAP_PROP_FRAME_WIDTH, float(fw))
+        self._cap.set(cv2.CAP_PROP_FRAME_HEIGHT, float(fh))
 
     def _capture_loop(self) -> None:
         with self._lock:
@@ -233,7 +248,8 @@ class Orchestrator:
         if not self._running:
             return
         self._open_camera()
-        frame_area = 640 * 480
+        with self._lock:
+            frame_area = float(max(1, self._cfg.capture_frame_width) * max(1, self._cfg.capture_frame_height))
         last = time.perf_counter()
         idle_sway_t = 0.0
         while self._running:
@@ -247,11 +263,27 @@ class Orchestrator:
             if not ok or frame is None:
                 time.sleep(0.05)
                 continue
+            t_frame_start = time.perf_counter()
             h, w = frame.shape[:2]
             frame_area = float(w * h)
 
+            now_m_fps = time.monotonic()
+            if self._capture_fps_window_t0 <= 0.0:
+                self._capture_fps_window_t0 = now_m_fps
+            self._capture_fps_count += 1
+            elapsed_fps = now_m_fps - self._capture_fps_window_t0
+            if elapsed_fps >= 1.0:
+                self.public.capture_fps = self._capture_fps_count / elapsed_fps
+                self._capture_fps_count = 0
+                self._capture_fps_window_t0 = now_m_fps
+            self.public.capture_width = int(w)
+            self.public.capture_height = int(h)
+
             with self._lock:
-                cfg = self._cfg.model_copy(deep=True)
+                cfg = self._cfg.model_copy(deep=False)
+            self.public.capture_target_fps = float(cfg.capture_target_fps)
+            self.public.capture_frame_width = int(cfg.capture_frame_width)
+            self.public.capture_frame_height = int(cfg.capture_frame_height)
 
             snap = self.vision.detect(frame, cfg.bbox_metric, frame_area)
             prev_fsm = self._prev_sm_state
@@ -346,7 +378,12 @@ class Orchestrator:
                     self._jpeg = buf.tobytes()
 
             self._maybe_enqueue_speech(cfg, snap)
-            time.sleep(0.02)
+            target_fps = max(0.5, min(120.0, float(cfg.capture_target_fps)))
+            frame_budget_s = 1.0 / target_fps
+            spent_s = time.perf_counter() - t_frame_start
+            rem_s = frame_budget_s - spent_s
+            if rem_s > 0:
+                time.sleep(rem_s)
 
     def _maybe_enqueue_speech(self, cfg: RuntimeConfig, snap: VisionSnapshot) -> None:
         with self._speech_lock:
@@ -384,7 +421,7 @@ class Orchestrator:
             except queue.Empty:
                 continue
             with self._lock:
-                cfg = self._cfg.model_copy(deep=True)
+                cfg = self._cfg.model_copy(deep=False)
             try:
                 if job == "tracking":
                     self._run_tracking_utterance(cfg)

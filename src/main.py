@@ -133,6 +133,12 @@ def _public_dict() -> dict[str, Any]:
         "behavior_tags": p.behavior_tags,
         "vision_device": p.vision_device,
         "gpu_metrics": p.gpu_metrics,
+        "capture_fps": p.capture_fps,
+        "capture_width": p.capture_width,
+        "capture_height": p.capture_height,
+        "capture_target_fps": p.capture_target_fps,
+        "capture_frame_width": p.capture_frame_width,
+        "capture_frame_height": p.capture_frame_height,
     }
 
 

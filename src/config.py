@@ -17,6 +17,9 @@ def _p(path: str) -> Path:
 
 class RuntimeConfig(BaseModel):
     camera_index: int = 0
+    capture_target_fps: float = Field(default=15.0, ge=0.5, le=120.0)
+    capture_frame_width: int = Field(default=640, ge=160, le=3840)
+    capture_frame_height: int = Field(default=480, ge=120, le=2160)
     bbox_metric: str = Field(default="area", pattern="^(area|height|normalized_area)$")
     lock_on_threshold: float = 8000.0
     idle_below_threshold: float = 5000.0
@@ -137,6 +140,24 @@ def build_config_schema() -> dict[str, Any]:
 
     d = RuntimeConfig()
     add("camera_index", "number", d.camera_index, "後端 OpenCV 相機索引（整數）。")
+    add(
+        "capture_target_fps",
+        "number",
+        d.capture_target_fps,
+        "相機主迴圈目標影格率（每秒幾幀）；單幀若超過此週期（含 YOLO）則不額外 sleep，會以實際可達上限為準。",
+    )
+    add(
+        "capture_frame_width",
+        "number",
+        d.capture_frame_width,
+        "請求相機解析度寬度 (px)；套用後會重新開啟相機，實際尺寸以驅動回報為準（見狀態表實測）。",
+    )
+    add(
+        "capture_frame_height",
+        "number",
+        d.capture_frame_height,
+        "請求相機解析度高度 (px)；同上。",
+    )
     add(
         "bbox_metric",
         "enum",
