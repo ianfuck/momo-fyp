@@ -13,6 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from backend.audio.player import AudioPlayer
 from backend.config import build_field_catalog, merge_config, validate_runtime_config
 from backend.llm.ollama_client import OllamaClient
+from backend.model_manager import ensure_runtime_models
 from backend.prompting.prompt_builder import PromptBuilder, validate_generated_sentence
 from backend.resource_manager import ResourceManager
 from backend.serial.esp32_link import ESP32Link
@@ -45,6 +46,7 @@ class Brain:
         self.background_tasks: list[asyncio.Task] = []
 
     async def start(self) -> None:
+        await asyncio.to_thread(self._prepare_runtime_models)
         self.vision.start()
         self.background_tasks = [
             asyncio.create_task(self.vision_loop()),
@@ -57,6 +59,11 @@ class Brain:
             with contextlib.suppress(asyncio.CancelledError):
                 await task
         self.vision.stop()
+
+    def _prepare_runtime_models(self) -> None:
+        ensure_runtime_models(self.config)
+        self.tts = QwenCloneTTS(self.config.tts_model_path, self.config.tts_ref_audio_path, self.config.tts_ref_text_path)
+        self.vision = VisionRuntime(self.config)
 
     def snapshot(self):
         vision = self.vision.get_snapshot()
@@ -440,6 +447,9 @@ async def build_apply_checks(payload: dict, config: RuntimeConfig) -> list[dict[
         except Exception as exc:
             checks.append({"component": "prompting", "status": "error", "message": f"Prompt reload failed: {exc}"})
 
+    if changed & {"yolo_model_path", "yolo_pose_model_path"}:
+        checks.append({"component": "vision-model", "status": "ok", "message": "YOLO model paths updated and verified."})
+
     if changed & {"ollama_base_url", "ollama_model", "ollama_timeout_sec"}:
         client = OllamaClient(config.ollama_base_url, min(config.ollama_timeout_sec, 15))
         try:
@@ -572,6 +582,16 @@ async def update_config(payload: dict):
             validation_errors=errors,
             effective_changes=[],
             apply_checks=[{"component": "config", "status": "error", "message": "Validation failed. Nothing was applied."}],
+            requires_pipeline_restart=False,
+        )
+    try:
+        await asyncio.to_thread(ensure_runtime_models, merged)
+    except Exception as exc:
+        return ConfigUpdateResponse(
+            applied_config=brain.config,
+            validation_errors=[str(exc)],
+            effective_changes=[],
+            apply_checks=[{"component": "model-download", "status": "error", "message": f"Model preparation failed: {exc}"}],
             requires_pipeline_restart=False,
         )
     changed = [key for key, value in payload.items() if getattr(brain.config, key) != value]

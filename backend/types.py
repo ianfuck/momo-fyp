@@ -124,8 +124,8 @@ class RuntimeConfig(BaseModel):
     camera_height: int = 480
     camera_fps: int = 10
     camera_mirror_preview: bool = False
-    yolo_model_path: str = "model/yolo/yolo11n.pt"
-    yolo_pose_model_path: str = "model/yolo/yolo11n-pose.pt"
+    yolo_model_path: str = "model/yolo/yolo26n.pt"
+    yolo_pose_model_path: str = "model/yolo/yolo26n-pose.pt"
     lock_bbox_threshold_ratio: float = 0.12
     unlock_bbox_threshold_ratio: float | None = None
     enter_debounce_ms: int = 1000
@@ -154,9 +154,7 @@ class RuntimeConfig(BaseModel):
         default_factory=lambda: ["resource/example/idle-sentences.csv"]
     )
     history_max_sentences: int = 10
-    tts_model_path: str = (
-        "model/huggingface/hf_snapshots/Qwen__Qwen3-TTS-12Hz-1.7B-Base"
-    )
+    tts_model_path: str = "model/huggingface/hf_snapshots/Qwen__Qwen3-TTS-12Hz-1.7B-Base"
     tts_ref_audio_path: str = "resource/voice/ref-voice.m4a"
     tts_ref_text_path: str = "resource/voice/transcript.txt"
     tts_output_volume: float = 1.0

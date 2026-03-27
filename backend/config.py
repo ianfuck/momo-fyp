@@ -170,10 +170,6 @@ def validate_runtime_config(candidate: RuntimeConfig) -> list[str]:
         errors.append("camera_height must be >= 240")
     if not 1 <= candidate.camera_fps <= 60:
         errors.append("camera_fps must be between 1 and 60")
-    if not Path(candidate.yolo_model_path).exists():
-        errors.append(f"yolo_model_path not found: {candidate.yolo_model_path}")
-    if not Path(candidate.yolo_pose_model_path).exists():
-        errors.append(f"yolo_pose_model_path not found: {candidate.yolo_pose_model_path}")
     if not 0.01 <= candidate.lock_bbox_threshold_ratio <= 0.95:
         errors.append("lock_bbox_threshold_ratio must be between 0.01 and 0.95")
     unlock = (

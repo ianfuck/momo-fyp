@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.11,<3.14"
 dependencies = [
   "fastapi>=0.116.0",
+  "huggingface-hub>=0.34.0",
   "httpx>=0.28.0",
   "lap>=0.5.13",
   "opencv-python>=4.13.0.92",
@@ -34,4 +35,3 @@ testpaths = ["tests"]
 
 [tool.uv]
 package = false
-
