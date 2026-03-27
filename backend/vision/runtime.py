@@ -28,9 +28,9 @@ class VisionState:
 class VisionRuntime:
     def __init__(self, config: RuntimeConfig) -> None:
         self.config = config
-        self.detector = PersonDetector("model/yolo/yolo11n.pt")
+        self.detector = PersonDetector(config.yolo_model_path)
         self.eyes = FaceEyeTracker()
-        self.pose = PoseTracker()
+        self.pose = PoseTracker(config.yolo_pose_model_path)
         self.motion = MotionTracker()
         self.capture: cv2.VideoCapture | None = None
         self.thread: threading.Thread | None = None
@@ -64,6 +64,8 @@ class VisionRuntime:
 
     def reconfigure(self, config: RuntimeConfig) -> None:
         self.config = config
+        self.detector = PersonDetector(config.yolo_model_path)
+        self.pose = PoseTracker(config.yolo_pose_model_path)
         self.failed_open_count = 0
         self.camera_disabled = False
         self.stop()

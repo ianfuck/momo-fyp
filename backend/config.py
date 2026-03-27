@@ -21,6 +21,8 @@ FIELD_DESCRIPTIONS: dict[str, tuple[str, str, str | None]] = {
     "camera_height": ("Height", "Requested camera capture height.", ">=240"),
     "camera_fps": ("FPS", "Requested camera frame rate.", "1-60"),
     "camera_mirror_preview": ("Mirror Preview", "Mirror the preview output in UI.", None),
+    "yolo_model_path": ("YOLO Model Path", "YOLO person detection model path.", None),
+    "yolo_pose_model_path": ("YOLO Pose Model Path", "YOLO pose model path.", None),
     "lock_bbox_threshold_ratio": ("Lock Threshold", "Person bbox area ratio required to enter lock mode.", "0.01-0.95"),
     "unlock_bbox_threshold_ratio": ("Unlock Threshold", "Person bbox area ratio required to remain locked.", "0.01-0.95"),
     "enter_debounce_ms": ("Enter Debounce", "Continuous time above threshold before locking.", ">=0"),
@@ -72,6 +74,8 @@ FIELD_GROUPS: dict[str, str] = {
     "camera_height": "camera",
     "camera_fps": "camera",
     "camera_mirror_preview": "camera",
+    "yolo_model_path": "vision",
+    "yolo_pose_model_path": "vision",
     "lock_bbox_threshold_ratio": "vision",
     "unlock_bbox_threshold_ratio": "vision",
     "enter_debounce_ms": "vision",
@@ -166,6 +170,10 @@ def validate_runtime_config(candidate: RuntimeConfig) -> list[str]:
         errors.append("camera_height must be >= 240")
     if not 1 <= candidate.camera_fps <= 60:
         errors.append("camera_fps must be between 1 and 60")
+    if not Path(candidate.yolo_model_path).exists():
+        errors.append(f"yolo_model_path not found: {candidate.yolo_model_path}")
+    if not Path(candidate.yolo_pose_model_path).exists():
+        errors.append(f"yolo_pose_model_path not found: {candidate.yolo_pose_model_path}")
     if not 0.01 <= candidate.lock_bbox_threshold_ratio <= 0.95:
         errors.append("lock_bbox_threshold_ratio must be between 0.01 and 0.95")
     unlock = (

@@ -124,6 +124,8 @@ class RuntimeConfig(BaseModel):
     camera_height: int = 480
     camera_fps: int = 10
     camera_mirror_preview: bool = False
+    yolo_model_path: str = "model/yolo/yolo11n.pt"
+    yolo_pose_model_path: str = "model/yolo/yolo11n-pose.pt"
     lock_bbox_threshold_ratio: float = 0.12
     unlock_bbox_threshold_ratio: float | None = None
     enter_debounce_ms: int = 1000
