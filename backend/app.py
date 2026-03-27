@@ -13,6 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from backend.audio.player import AudioPlayer
 from backend.config import build_field_catalog, merge_config, validate_runtime_config
+from backend.device_utils import expected_accelerator_label
 from backend.llm.ollama_client import OllamaClient
 from backend.model_manager import ensure_runtime_models
 from backend.prompting.prompt_builder import PromptBuilder, validate_generated_sentence
@@ -49,6 +50,7 @@ class Brain:
     async def start(self) -> None:
         if should_prepare_models():
             await asyncio.to_thread(self._prepare_runtime_models)
+        await self._print_startup_diagnostics()
         self.vision.start()
         self.background_tasks = [
             asyncio.create_task(self.vision_loop()),
@@ -70,6 +72,50 @@ class Brain:
         except Exception as exc:
             self.state.event_log = [f"TTS preload failed: {exc}", *self.state.event_log][:20]
         self.vision = VisionRuntime(self.config)
+
+    async def _print_startup_diagnostics(self) -> None:
+        for line in await self._collect_startup_diagnostics():
+            print(line, flush=True)
+
+    async def _collect_startup_diagnostics(self) -> list[str]:
+        expected = expected_accelerator_label()
+        lines = [f"[startup] expected_accelerator={expected}"]
+        try:
+            person_backend = await asyncio.to_thread(self.vision.detector.warmup)
+            pose_backend = await asyncio.to_thread(self.vision.pose.warmup)
+            lines.append(
+                f"[startup] yolo person={person_backend} pose={pose_backend} target={expected} ok={person_backend == expected and pose_backend == expected}"
+            )
+        except Exception as exc:
+            lines.append(f"[startup] yolo error={exc}")
+
+        lines.append(
+            f"[startup] tts backend={self.tts.device_backend} target={expected} loaded={self.tts.loaded} ok={self.tts.device_backend == expected}"
+        )
+
+        try:
+            ollama = OllamaClient(self.config.ollama_base_url, min(self.config.ollama_timeout_sec, 30))
+            models = await ollama.list_models()
+            if self.config.ollama_model not in models:
+                lines.append(f"[startup] ollama model={self.config.ollama_model} available=false")
+                return lines
+            await ollama.warmup_model(self.config.ollama_model)
+            running = await ollama.running_models()
+            current = next(
+                (
+                    item for item in running
+                    if item.get("name") == self.config.ollama_model or item.get("model") == self.config.ollama_model
+                ),
+                None,
+            )
+            size_vram = int(current.get("size_vram", 0)) if current else 0
+            backend = expected if size_vram > 0 else "cpu"
+            lines.append(
+                f"[startup] ollama backend={backend} target={expected} size_vram={size_vram} ok={backend == expected}"
+            )
+        except Exception as exc:
+            lines.append(f"[startup] ollama error={exc}")
+        return lines
 
     def snapshot(self):
         vision = self.vision.get_snapshot()

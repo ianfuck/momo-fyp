@@ -18,6 +18,25 @@ class OllamaClient:
             payload = response.json()
             return [item["name"] for item in payload.get("models", [])]
 
+    async def running_models(self) -> list[dict]:
+        async with httpx.AsyncClient(timeout=self.timeout_sec) as client:
+            response = await client.get(f"{self.base_url}/api/ps")
+            response.raise_for_status()
+            payload = response.json()
+            return list(payload.get("models", []))
+
+    async def warmup_model(self, model: str) -> dict:
+        payload = {
+            "model": model,
+            "prompt": "ping",
+            "stream": False,
+            "options": {"num_predict": 1, "temperature": 0},
+        }
+        async with httpx.AsyncClient(timeout=self.timeout_sec) as client:
+            response = await client.post(f"{self.base_url}/api/generate", json=payload)
+            response.raise_for_status()
+            return response.json()
+
     async def generate_stream(
         self,
         model: str,

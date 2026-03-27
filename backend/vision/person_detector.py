@@ -6,6 +6,8 @@ import numpy as np
 from pydantic import BaseModel
 from ultralytics import YOLO
 
+from backend.device_utils import backend_label_for_device, get_torch_device
+
 
 class PersonDetection(BaseModel):
     track_id: int
@@ -19,6 +21,7 @@ class PersonDetector:
     def __init__(self, model_path: str, conf: float = 0.25) -> None:
         self.model_path = model_path
         self.conf = conf
+        self.device = get_torch_device()
         self.loaded = False
         self._model: YOLO | None = None
 
@@ -30,9 +33,14 @@ class PersonDetector:
             self.loaded = True
         return self._model
 
+    def warmup(self) -> str:
+        frame = np.zeros((64, 64, 3), dtype=np.uint8)
+        self._ensure_model().predict(frame, conf=self.conf, verbose=False, device=self.device)
+        return backend_label_for_device(self.device)
+
     def detect(self, frame: np.ndarray) -> list[PersonDetection]:
         model = self._ensure_model()
-        results = model.track(frame, persist=True, classes=[0], conf=self.conf, verbose=False)
+        results = model.track(frame, persist=True, classes=[0], conf=self.conf, verbose=False, device=self.device)
         detections: list[PersonDetection] = []
         if not results:
             return detections

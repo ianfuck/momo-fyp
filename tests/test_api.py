@@ -1,9 +1,11 @@
 import asyncio
 import time
+from pathlib import Path
 
 from fastapi.testclient import TestClient
 
 from backend.app import app, brain
+from backend.tts.qwen_clone import QwenCloneTTS
 from backend.types import AudienceFeatures, PipelineStage, ServoTelemetry
 
 
@@ -160,3 +162,93 @@ def test_status_snapshot_keeps_computed_servo_angles():
     payload = response.json()
     assert payload["servo"]["left_deg"] == 83.5
     assert payload["servo"]["right_deg"] == 97.25
+
+
+def test_collect_startup_diagnostics_reports_expected_backends(monkeypatch):
+    class DummyDetector:
+        def warmup(self) -> str:
+            return "gpu"
+
+    class DummyPose:
+        def warmup(self) -> str:
+            return "gpu"
+
+    class DummyVision:
+        detector = DummyDetector()
+        pose = DummyPose()
+
+    class DummyTTS:
+        device_backend = "gpu"
+        loaded = True
+
+    class DummyOllama:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def list_models(self) -> list[str]:
+            return [brain.config.ollama_model]
+
+        async def warmup_model(self, model: str) -> dict:
+            return {"model": model}
+
+        async def running_models(self) -> list[dict]:
+            return [{"name": brain.config.ollama_model, "size_vram": 123}]
+
+    original_vision = brain.vision
+    original_tts = brain.tts
+    brain.vision = DummyVision()
+    brain.tts = DummyTTS()
+    monkeypatch.setattr("backend.app.expected_accelerator_label", lambda: "gpu")
+    monkeypatch.setattr("backend.app.OllamaClient", DummyOllama)
+
+    try:
+        lines = asyncio.run(brain._collect_startup_diagnostics())
+        assert any("yolo person=gpu pose=gpu" in line for line in lines)
+        assert any("tts backend=gpu" in line for line in lines)
+        assert any("ollama backend=gpu" in line for line in lines)
+    finally:
+        brain.vision = original_vision
+        brain.tts = original_tts
+
+
+def test_reference_audio_loads_wav_without_ffmpeg(monkeypatch):
+    tts = QwenCloneTTS("model", "voice.wav", "transcript.txt")
+    called = {"ffmpeg": False, "loaded": None}
+
+    def fake_load(path: str):
+        called["loaded"] = path
+        return [0.0], 24000
+
+    monkeypatch.setattr(tts, "_load_audio_with_librosa", fake_load)
+    monkeypatch.setattr(
+        tts,
+        "_convert_reference_audio_with_ffmpeg",
+        lambda source: called.__setitem__("ffmpeg", True),
+    )
+
+    wav, sr = tts._load_reference_audio()
+    assert wav == [0.0]
+    assert sr == 24000
+    assert called["loaded"] == "voice.wav"
+    assert called["ffmpeg"] is False
+
+
+def test_reference_audio_prefers_ffmpeg_for_mp3(monkeypatch):
+    tts = QwenCloneTTS("model", "voice.mp3", "transcript.txt")
+    loaded_paths: list[str] = []
+
+    def fake_load(path: str):
+        loaded_paths.append(path)
+        return [1.0], 24000
+
+    monkeypatch.setattr(tts, "_load_audio_with_librosa", fake_load)
+    monkeypatch.setattr(
+        tts,
+        "_convert_reference_audio_with_ffmpeg",
+        lambda source: Path("tmp/ref_voice_source.wav"),
+    )
+
+    wav, sr = tts._load_reference_audio()
+    assert wav == [1.0]
+    assert sr == 24000
+    assert loaded_paths == ["tmp/ref_voice_source.wav"]

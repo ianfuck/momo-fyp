@@ -11,6 +11,8 @@ import librosa
 import numpy as np
 import soundfile as sf
 
+from backend.device_utils import backend_label_for_device, get_torch_device
+
 
 class QwenCloneTTS:
     def __init__(self, model_path: str, ref_audio_path: str, ref_text_path: str) -> None:
@@ -23,6 +25,8 @@ class QwenCloneTTS:
         self._lock = threading.Lock()
         self.available = Path(model_path).exists() and Path(ref_audio_path).exists() and Path(ref_text_path).exists()
         self._prepared_ref_audio: str | None = None
+        self.device = get_torch_device()
+        self.device_backend = backend_label_for_device(self.device)
 
     def preload(self) -> None:
         with self._lock:
@@ -37,13 +41,18 @@ class QwenCloneTTS:
         from qwen_tts import Qwen3TTSModel
 
         kwargs: dict = {}
-        if torch.cuda.is_available():
+        if self.device.startswith("cuda"):
             kwargs["device_map"] = "cuda:0"
             kwargs["dtype"] = torch.bfloat16
+        elif self.device == "mps":
+            kwargs["device_map"] = "cpu"
+            kwargs["dtype"] = torch.float32
         else:
             kwargs["device_map"] = "cpu"
             kwargs["dtype"] = torch.float32
         model = Qwen3TTSModel.from_pretrained(self.model_path, **kwargs)
+        if self.device == "mps" and hasattr(model, "to"):
+            model = model.to("mps")
         prepared_ref = self._prepare_reference_audio()
         prompt = model.create_voice_clone_prompt(
             ref_audio=prepared_ref,
@@ -89,6 +98,10 @@ class QwenCloneTTS:
 
     def _load_reference_audio(self) -> tuple[np.ndarray, int]:
         source = Path(self.ref_audio_path)
+        if source.suffix.lower() != ".wav":
+            converted = self._convert_reference_audio_with_ffmpeg(source)
+            if converted is not None:
+                return self._load_audio_with_librosa(str(converted))
         try:
             return self._load_audio_with_librosa(str(source))
         except Exception as exc:

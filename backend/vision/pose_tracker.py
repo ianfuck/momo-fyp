@@ -5,6 +5,8 @@ from dataclasses import dataclass
 import numpy as np
 from ultralytics import YOLO
 
+from backend.device_utils import backend_label_for_device, get_torch_device
+
 
 @dataclass
 class PoseSignals:
@@ -23,6 +25,7 @@ class PoseTracker:
     def __init__(self, model_path: str, conf: float = 0.25) -> None:
         self.model_path = model_path
         self.conf = conf
+        self.device = get_torch_device()
         self._model: YOLO | None = None
 
     def _ensure_model(self) -> YOLO:
@@ -30,12 +33,17 @@ class PoseTracker:
             self._model = YOLO(self.model_path)
         return self._model
 
+    def warmup(self) -> str:
+        frame = np.zeros((64, 64, 3), dtype=np.uint8)
+        self._ensure_model().predict(frame, conf=self.conf, verbose=False, device=self.device)
+        return backend_label_for_device(self.device)
+
     def detect(self, frame: np.ndarray, person_bbox: list[int]) -> PoseSignals:
         x1, y1, x2, y2 = person_bbox
         roi = frame[max(0, y1):max(y1 + 1, y2), max(0, x1):max(x1 + 1, x2)]
         if roi.size == 0:
             return PoseSignals()
-        results = self._ensure_model().predict(roi, conf=self.conf, verbose=False)
+        results = self._ensure_model().predict(roi, conf=self.conf, verbose=False, device=self.device)
         if not results:
             return PoseSignals()
         result = results[0]
