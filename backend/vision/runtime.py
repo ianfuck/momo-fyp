@@ -4,6 +4,7 @@ import os
 import threading
 import time
 from dataclasses import dataclass
+from collections import deque
 
 import cv2
 import numpy as np
@@ -11,7 +12,7 @@ import numpy as np
 from backend.types import AudienceFeatures, RuntimeConfig, ServoTelemetry
 from backend.vision.actions import MotionTracker
 from backend.vision.face_eyes import FaceEyeTracker
-from backend.vision.features import classify_body_shape, classify_colors, classify_distance, focus_score
+from backend.vision.features import classify_body_shape, classify_colors, classify_distance, focus_score, smooth_color_labels
 from backend.vision.pose_tracker import PoseTracker
 from backend.vision.person_detector import PersonDetection, PersonDetector
 
@@ -32,6 +33,8 @@ class VisionRuntime:
         self.eyes = FaceEyeTracker()
         self.pose = PoseTracker(config.yolo_pose_model_path)
         self.motion = MotionTracker()
+        self.top_color_history: deque[str] = deque(maxlen=6)
+        self.bottom_color_history: deque[str] = deque(maxlen=6)
         self.capture: cv2.VideoCapture | None = None
         self.thread: threading.Thread | None = None
         self.running = False
@@ -68,6 +71,8 @@ class VisionRuntime:
         self.pose = PoseTracker(config.yolo_pose_model_path)
         self.failed_open_count = 0
         self.camera_disabled = False
+        self.top_color_history.clear()
+        self.bottom_color_history.clear()
         self.stop()
         self.start()
 
@@ -194,12 +199,28 @@ class VisionRuntime:
     def _process_frame(self, frame: np.ndarray) -> tuple[AudienceFeatures, ServoTelemetry]:
         detections = self.detector.detect(frame)
         if not detections:
+            self.top_color_history.clear()
+            self.bottom_color_history.clear()
             return AudienceFeatures(), ServoTelemetry()
         person = max(detections, key=lambda item: item.bbox_area_ratio)
-        top_color, bottom_color = classify_colors(frame, person.bbox)
-        height_class, build_class = classify_body_shape(person.bbox, frame.shape)
-        face = self.eyes.locate(frame, person.bbox, person.center_x_norm)
         pose = self.pose.detect(frame, person.bbox)
+        face = self.eyes.locate(frame, person.bbox, person.center_x_norm)
+        top_color, bottom_color = classify_colors(
+            frame,
+            person.bbox,
+            face.face_bbox,
+            {
+                "left_shoulder": pose.left_shoulder_point,
+                "right_shoulder": pose.right_shoulder_point,
+                "left_hip": pose.left_hip_point,
+                "right_hip": pose.right_hip_point,
+            },
+        )
+        self.top_color_history.append(top_color)
+        self.bottom_color_history.append(bottom_color)
+        top_color = smooth_color_labels(list(self.top_color_history), top_color)
+        bottom_color = smooth_color_labels(list(self.bottom_color_history), bottom_color)
+        height_class, build_class = classify_body_shape(person.bbox, frame.shape)
         focus = focus_score(frame, face.face_bbox or person.bbox)
         distance = classify_distance(
             person.bbox_area_ratio,

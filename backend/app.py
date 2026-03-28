@@ -121,6 +121,7 @@ class Brain:
     def snapshot(self):
         vision = self.vision.get_snapshot()
         self.state.audience = vision.features
+        self.state.servo = self._compute_servo_from_features(vision.features, vision.servo.tracking_source)
         snap = self.state.snapshot()
         snap.stats = get_system_stats("tmp")
         snap.serial_connected = self.serial.connected
@@ -177,17 +178,8 @@ class Brain:
         now = time.monotonic()
         vision = self.vision.get_snapshot()
         features = vision.features
-        eye_midpoint_x = features.eye_midpoint[0] if features.eye_midpoint else features.center_x_norm
         self.state.audience = features
-        self.state.servo = compute_servo_angles(
-            eye_midpoint_x_norm=eye_midpoint_x,
-            bbox_area_ratio=features.bbox_area_ratio,
-            left_zero_deg=self.config.servo_left_zero_deg,
-            right_zero_deg=self.config.servo_right_zero_deg,
-            left_limits=(self.config.servo_left_min_deg, self.config.servo_left_max_deg),
-            right_limits=(self.config.servo_right_min_deg, self.config.servo_right_max_deg),
-        )
-        self.state.servo.tracking_source = vision.servo.tracking_source
+        self.state.servo = self._compute_servo_from_features(features, vision.servo.tracking_source)
         if self.serial.connected and features.track_id is not None:
             self.serial.send_servo_command(
                 self.state.servo.left_deg,
@@ -224,6 +216,19 @@ class Brain:
             self.state.locked_track_id = features.track_id
             if self.state.sentence_index == 0:
                 self.last_sentence_finished_at = now
+
+    def _compute_servo_from_features(self, features, tracking_source: str):
+        eye_midpoint_x = features.eye_midpoint[0] if features.eye_midpoint else features.center_x_norm
+        servo = compute_servo_angles(
+            eye_midpoint_x_norm=eye_midpoint_x,
+            bbox_area_ratio=features.bbox_area_ratio,
+            left_zero_deg=self.config.servo_left_zero_deg,
+            right_zero_deg=self.config.servo_right_zero_deg,
+            left_limits=(self.config.servo_left_min_deg, self.config.servo_left_max_deg),
+            right_limits=(self.config.servo_right_min_deg, self.config.servo_right_max_deg),
+        )
+        servo.tracking_source = tracking_source
+        return servo
 
     async def _maybe_generate_tracking_line(self) -> None:
         if self.audio.is_playing() or self.generation_lock.locked():

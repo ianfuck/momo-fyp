@@ -144,13 +144,13 @@ def test_get_config_reflects_latest_applied_value():
     assert payload["config"]["camera_fps"] == 15
 
 
-def test_status_snapshot_keeps_computed_servo_angles():
+def test_status_snapshot_uses_latest_vision_servo_angles():
     original_get_snapshot = brain.vision.get_snapshot
     brain.state.servo = ServoTelemetry(left_deg=83.5, right_deg=97.25, tracking_source="eye_midpoint")
 
     class FakeVisionState:
-        features = AudienceFeatures(top_color="灰色")
-        servo = ServoTelemetry(left_deg=90, right_deg=90, tracking_source="person_center")
+        features = AudienceFeatures(top_color="灰色", bbox_area_ratio=0.35, center_x_norm=0.5, eye_midpoint=[0.72, 0.5])
+        servo = ServoTelemetry(left_deg=90, right_deg=90, tracking_source="eye_midpoint")
         frame_jpeg = None
         frame_shape = None
         target_seen_at = None
@@ -160,8 +160,9 @@ def test_status_snapshot_keeps_computed_servo_angles():
     brain.vision.get_snapshot = original_get_snapshot
     assert response.status_code == 200
     payload = response.json()
-    assert payload["servo"]["left_deg"] == 83.5
-    assert payload["servo"]["right_deg"] == 97.25
+    assert payload["servo"]["left_deg"] > 90
+    assert payload["servo"]["right_deg"] > 90
+    assert payload["servo"]["tracking_source"] == "eye_midpoint"
 
 
 def test_collect_startup_diagnostics_reports_expected_backends(monkeypatch):
@@ -231,6 +232,40 @@ def test_reference_audio_loads_wav_without_ffmpeg(monkeypatch):
     assert sr == 24000
     assert called["loaded"] == "voice.wav"
     assert called["ffmpeg"] is False
+
+
+def test_snapshot_recomputes_servo_from_latest_vision(monkeypatch):
+    from backend.types import AudienceFeatures, ServoTelemetry
+    from backend.vision.runtime import VisionState
+
+    original_snapshot = brain.vision.get_snapshot
+    original_state_servo = brain.state.servo
+
+    brain.state.servo = ServoTelemetry(left_deg=10.0, right_deg=20.0, tracking_source="stale")
+
+    def fake_snapshot():
+        return VisionState(
+            features=AudienceFeatures(
+                track_id=1,
+                bbox_area_ratio=0.35,
+                center_x_norm=0.5,
+                eye_midpoint=[0.72, 0.5],
+            ),
+            servo=ServoTelemetry(tracking_source="eye_midpoint"),
+            frame_jpeg=None,
+            frame_shape=(640, 480),
+            target_seen_at=None,
+        )
+
+    brain.vision.get_snapshot = fake_snapshot
+    try:
+        snap = brain.snapshot()
+        assert snap.servo.left_deg > 90
+        assert snap.servo.right_deg > 90
+        assert snap.servo.tracking_source == "eye_midpoint"
+    finally:
+        brain.vision.get_snapshot = original_snapshot
+        brain.state.servo = original_state_servo
 
 
 def test_reference_audio_prefers_ffmpeg_for_mp3(monkeypatch):

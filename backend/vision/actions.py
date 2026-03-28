@@ -55,7 +55,7 @@ class MotionTracker:
             shoulder_delta = self.shoulder_y_history[-1] - min(self.shoulder_y_history)
             actions.crouch = actions.crouch or shoulder_delta > crouch_delta_threshold * 0.7
 
-        actions.defocus = area_ratio >= defocus_threshold or focus_score < focus_score_threshold
+        actions.defocus = focus_score < focus_score_threshold
         return actions
 
 
