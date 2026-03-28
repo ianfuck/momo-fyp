@@ -145,6 +145,7 @@ class RuntimeConfig(BaseModel):
     crouch_delta_threshold: float = 0.18
     ollama_base_url: str = "http://127.0.0.1:11434"
     ollama_model: str = "qwen3.5:2b"
+    llm_use_person_crop: bool = False
     ollama_timeout_sec: int = 600
     ollama_max_retries: int = 1
     tracking_examples_selected: list[str] = Field(

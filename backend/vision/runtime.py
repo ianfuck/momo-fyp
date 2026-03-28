@@ -14,16 +14,17 @@ from backend.vision.actions import MotionTracker
 from backend.vision.face_eyes import FaceEyeTracker
 from backend.vision.features import classify_body_shape, classify_colors, classify_distance, focus_score, smooth_color_labels
 from backend.vision.pose_tracker import PoseTracker
-from backend.vision.person_detector import PersonDetection, PersonDetector
+from backend.vision.person_detector import PersonDetector
 
 
 @dataclass
 class VisionState:
     features: AudienceFeatures
     servo: ServoTelemetry
-    frame_jpeg: bytes | None
-    frame_shape: tuple[int, int] | None
-    target_seen_at: float | None
+    frame_jpeg: bytes | None = None
+    person_crop_jpeg: bytes | None = None
+    frame_shape: tuple[int, int] | None = None
+    target_seen_at: float | None = None
 
 
 class VisionRuntime:
@@ -46,6 +47,7 @@ class VisionRuntime:
             features=AudienceFeatures(),
             servo=ServoTelemetry(),
             frame_jpeg=None,
+            person_crop_jpeg=None,
             frame_shape=None,
             target_seen_at=None,
         )
@@ -82,6 +84,7 @@ class VisionRuntime:
                 features=self.latest_state.features.model_copy(deep=True),
                 servo=self.latest_state.servo.model_copy(deep=True),
                 frame_jpeg=self.latest_state.frame_jpeg,
+                person_crop_jpeg=self.latest_state.person_crop_jpeg,
                 frame_shape=self.latest_state.frame_shape,
                 target_seen_at=self.latest_state.target_seen_at,
             )
@@ -166,11 +169,13 @@ class VisionRuntime:
             features, servo = self._process_frame(frame)
             annotated = self._annotate(frame.copy(), features, servo)
             ok_jpg, encoded = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 80])
+            person_crop = self._encode_person_crop(frame, features.person_bbox)
             with self.lock:
                 self.latest_state = VisionState(
                     features=features,
                     servo=servo,
                     frame_jpeg=encoded.tobytes() if ok_jpg else None,
+                    person_crop_jpeg=person_crop,
                     frame_shape=(frame.shape[1], frame.shape[0]),
                     target_seen_at=time.monotonic() if features.track_id is not None else self.latest_state.target_seen_at,
                 )
@@ -184,10 +189,12 @@ class VisionRuntime:
         features, servo = self._process_frame(frame)
         annotated = self._annotate(frame.copy(), features, servo)
         ok_jpg, encoded = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 80])
+        person_crop = self._encode_person_crop(frame, features.person_bbox)
         state = VisionState(
             features=features,
             servo=servo,
             frame_jpeg=encoded.tobytes() if ok_jpg else jpeg_bytes,
+            person_crop_jpeg=person_crop,
             frame_shape=(frame.shape[1], frame.shape[0]),
             target_seen_at=time.monotonic() if features.track_id is not None else self.latest_state.target_seen_at,
         )
@@ -276,6 +283,23 @@ class VisionRuntime:
         )
         servo = ServoTelemetry(tracking_source=face.tracking_source)
         return features, servo
+
+    def _encode_person_crop(self, frame: np.ndarray, bbox: list[int] | None) -> bytes | None:
+        if bbox is None:
+            return None
+        x1, y1, x2, y2 = bbox
+        height, width = frame.shape[:2]
+        x1 = max(0, min(x1, width - 1))
+        y1 = max(0, min(y1, height - 1))
+        x2 = max(x1 + 1, min(x2, width))
+        y2 = max(y1 + 1, min(y2, height))
+        crop = frame[y1:y2, x1:x2]
+        if crop.size == 0:
+            return None
+        ok_jpg, encoded = cv2.imencode(".jpg", crop, [cv2.IMWRITE_JPEG_QUALITY, 90])
+        if not ok_jpg:
+            return None
+        return encoded.tobytes()
 
     def _annotate(self, frame: np.ndarray, features: AudienceFeatures, servo: ServoTelemetry) -> np.ndarray:
         height, width = frame.shape[:2]

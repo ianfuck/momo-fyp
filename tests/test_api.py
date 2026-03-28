@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from backend.app import app, brain
 from backend.tts.qwen_clone import QwenCloneTTS
 from backend.types import AudienceFeatures, PipelineStage, ServoTelemetry
+from backend.vision.runtime import VisionState
 
 
 client = TestClient(app)
@@ -33,6 +34,113 @@ def test_simulate_pipeline_returns_prompt_and_snapshot():
     assert response.status_code == 200
     payload = response.json()
     assert payload["snapshot"]["pipeline"]["stage"] == "PLAYBACK"
+
+
+def test_generate_tracking_line_uses_person_crop_mode_when_enabled():
+    original_config = brain.config.model_copy(deep=True)
+    original_prompt_builder = brain.prompts.build_tracking_prompt
+    original_generate = brain._generate_with_ollama
+    original_speak = brain._speak_line
+    original_snapshot = brain.vision.get_snapshot
+    original_sentence_index = brain.state.sentence_index
+    original_active_sentence_index = brain.state.active_sentence_index
+    original_audience = brain.state.audience.model_copy(deep=True)
+    original_event_log = list(brain.state.event_log)
+
+    captured: dict[str, object] = {}
+
+    def fake_build_tracking_prompt(*args, **kwargs):
+        captured["use_visual_audience"] = kwargs["use_visual_audience"]
+        return {"system": "sys", "user": "user", "required_terms": []}
+
+    async def fake_generate(system: str, prompt: str, limit: int, required_terms=None, images=None):
+        captured["images"] = images
+        return "測試台詞。"
+
+    async def fake_speak(_: str):
+        return None
+
+    brain.config.llm_use_person_crop = True
+    brain.state.sentence_index = 0
+    brain.state.active_sentence_index = 0
+    brain.state.audience = AudienceFeatures(top_color="灰色", distance_class="near")
+    brain.prompts.build_tracking_prompt = fake_build_tracking_prompt
+    brain._generate_with_ollama = fake_generate
+    brain._speak_line = fake_speak
+    brain.vision.get_snapshot = lambda: VisionState(
+        features=AudienceFeatures(track_id=1, person_bbox=[2, 3, 10, 12]),
+        servo=ServoTelemetry(tracking_source="person"),
+        person_crop_jpeg=b"fake-crop",
+    )
+
+    try:
+        asyncio.run(brain.generate_tracking_line())
+        assert captured["use_visual_audience"] is True
+        assert captured["images"] == [b"fake-crop"]
+    finally:
+        brain.config = original_config
+        brain.prompts.build_tracking_prompt = original_prompt_builder
+        brain._generate_with_ollama = original_generate
+        brain._speak_line = original_speak
+        brain.vision.get_snapshot = original_snapshot
+        brain.state.sentence_index = original_sentence_index
+        brain.state.active_sentence_index = original_active_sentence_index
+        brain.state.audience = original_audience
+        brain.state.event_log = original_event_log
+
+
+def test_generate_tracking_line_falls_back_when_person_crop_missing():
+    original_config = brain.config.model_copy(deep=True)
+    original_prompt_builder = brain.prompts.build_tracking_prompt
+    original_generate = brain._generate_with_ollama
+    original_speak = brain._speak_line
+    original_snapshot = brain.vision.get_snapshot
+    original_sentence_index = brain.state.sentence_index
+    original_active_sentence_index = brain.state.active_sentence_index
+    original_audience = brain.state.audience.model_copy(deep=True)
+    original_event_log = list(brain.state.event_log)
+
+    captured: dict[str, object] = {}
+
+    def fake_build_tracking_prompt(*args, **kwargs):
+        captured["use_visual_audience"] = kwargs["use_visual_audience"]
+        return {"system": "sys", "user": "user", "required_terms": []}
+
+    async def fake_generate(system: str, prompt: str, limit: int, required_terms=None, images=None):
+        captured["images"] = images
+        return "測試台詞。"
+
+    async def fake_speak(_: str):
+        return None
+
+    brain.config.llm_use_person_crop = True
+    brain.state.sentence_index = 0
+    brain.state.active_sentence_index = 0
+    brain.state.audience = AudienceFeatures(top_color="灰色", distance_class="near")
+    brain.prompts.build_tracking_prompt = fake_build_tracking_prompt
+    brain._generate_with_ollama = fake_generate
+    brain._speak_line = fake_speak
+    brain.vision.get_snapshot = lambda: VisionState(
+        features=AudienceFeatures(track_id=1, person_bbox=[2, 3, 10, 12]),
+        servo=ServoTelemetry(tracking_source="person"),
+        person_crop_jpeg=None,
+    )
+
+    try:
+        asyncio.run(brain.generate_tracking_line())
+        assert captured["use_visual_audience"] is False
+        assert captured["images"] is None
+        assert any("falling back to prompt-only mode" in item for item in brain.state.event_log)
+    finally:
+        brain.config = original_config
+        brain.prompts.build_tracking_prompt = original_prompt_builder
+        brain._generate_with_ollama = original_generate
+        brain._speak_line = original_speak
+        brain.vision.get_snapshot = original_snapshot
+        brain.state.sentence_index = original_sentence_index
+        brain.state.active_sentence_index = original_active_sentence_index
+        brain.state.audience = original_audience
+        brain.state.event_log = original_event_log
 
 
 def test_update_config_returns_apply_checks():
@@ -237,7 +345,6 @@ def test_reference_audio_loads_wav_without_ffmpeg(monkeypatch):
 
 def test_snapshot_recomputes_servo_from_latest_vision(monkeypatch):
     from backend.types import AudienceFeatures, ServoTelemetry
-    from backend.vision.runtime import VisionState
 
     original_snapshot = brain.vision.get_snapshot
     original_state_servo = brain.state.servo

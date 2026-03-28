@@ -26,6 +26,28 @@ def test_tracking_prompt_uses_stage_specific_examples():
     assert "揮" in prompt["required_terms"]
 
 
+def test_tracking_prompt_visual_mode_uses_crop_instruction_instead_of_summary():
+    builder = PromptBuilder(
+        "resource/md/system-persona_tracking.md",
+        "resource/md/system-persona_idle.md",
+    )
+    prompt = builder.build_tracking_prompt(
+        sentence_index=2,
+        selected_examples=[
+            "resource/example/track-example-1.csv",
+            "resource/example/track-example-2.csv",
+        ],
+        audience=AudienceFeatures(top_color="粉色", height_class="short", build_class="slim", distance_class="near"),
+        event_summary="無",
+        reacquired=False,
+        use_visual_audience=True,
+    )
+    assert "觀眾特徵摘要:" not in prompt["user"]
+    assert "觀眾特徵來源:" in prompt["user"]
+    assert "crop 圖" in prompt["user"]
+    assert prompt["required_terms"] == []
+
+
 def test_sentence_validator():
     assert validate_generated_sentence("你好。", 22) == []
     assert validate_generated_sentence("", 22)

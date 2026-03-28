@@ -254,12 +254,17 @@ class Brain:
             sentence_index = self.state.sentence_index + 1
             self.state.active_sentence_index = sentence_index
             self.state.set_pipeline_stage(PipelineStage.LLM)
+            vision_snapshot = self.vision.get_snapshot()
+            use_person_crop = self.config.llm_use_person_crop and vision_snapshot.person_crop_jpeg is not None
+            if self.config.llm_use_person_crop and not use_person_crop:
+                self.state.event_log = ["LLM person crop mode requested but no crop was available; falling back to prompt-only mode", *self.state.event_log][:20]
             prompt = self.prompts.build_tracking_prompt(
                 sentence_index=sentence_index,
                 selected_examples=self.config.tracking_examples_selected,
                 audience=self.state.audience,
                 event_summary=self._event_summary(),
                 reacquired=self.state.mode == SystemMode.RECONNECTING or self.state.audience.actions.returned_after_defocus,
+                use_visual_audience=use_person_crop,
             )
             self.state.current_prompt_system = prompt["system"]
             self.state.current_prompt_user = prompt["user"]
@@ -268,6 +273,7 @@ class Brain:
                 str(prompt["user"]),
                 22,
                 required_terms=list(prompt.get("required_terms", [])),
+                images=[vision_snapshot.person_crop_jpeg] if use_person_crop and vision_snapshot.person_crop_jpeg else None,
             )
             await self._speak_line(text)
             self.state.sentence_index = sentence_index
@@ -293,15 +299,30 @@ class Brain:
             await self._speak_line(text)
             self.last_idle_line_at = time.monotonic()
 
-    async def _generate_with_ollama(self, system: str, prompt: str, limit: int, required_terms: list[str] | None = None) -> str:
+    async def _generate_with_ollama(
+        self,
+        system: str,
+        prompt: str,
+        limit: int,
+        required_terms: list[str] | None = None,
+        images: list[bytes] | None = None,
+    ) -> str:
         client = OllamaClient(self.config.ollama_base_url, self.config.ollama_timeout_sec)
         started = time.monotonic()
-        text = await self._generate_validated_text(client, system, prompt, limit, required_terms or [])
+        text = await self._generate_validated_text(client, system, prompt, limit, required_terms or [], images=images)
         self.state.llm_latency_ms = int((time.monotonic() - started) * 1000)
         self.state.last_llm_output = text
         return text
 
-    async def _generate_validated_text(self, client: OllamaClient, system: str, prompt: str, limit: int, required_terms: list[str]) -> str:
+    async def _generate_validated_text(
+        self,
+        client: OllamaClient,
+        system: str,
+        prompt: str,
+        limit: int,
+        required_terms: list[str],
+        images: list[bytes] | None = None,
+    ) -> str:
         attempts = [
             {
                 "system": system,
@@ -336,7 +357,7 @@ class Brain:
         last_errors: list[str] = []
         for attempt in attempts:
             text = await asyncio.wait_for(
-                self._stream_text(client, attempt["system"], attempt["prompt"], attempt["options"]),
+                self._stream_text(client, attempt["system"], attempt["prompt"], attempt["options"], images=images),
                 timeout=self.config.ollama_timeout_sec,
             )
             errors = self._validate_output(text, limit, required_terms)
@@ -361,6 +382,7 @@ class Brain:
                     "repeat_penalty": 1.2,
                     "stop": ["\n\n", "\n- ", "</s>"],
                 },
+                images=images,
             ),
             timeout=self.config.ollama_timeout_sec,
         )
@@ -382,6 +404,7 @@ class Brain:
                     "repeat_penalty": 1.15,
                     "stop": ["\n\n", "\n- ", "</s>"],
                 },
+                images=images,
             ),
             timeout=self.config.ollama_timeout_sec,
         )
@@ -407,13 +430,21 @@ class Brain:
     def _contains_required_terms(self, text: str, required_terms: list[str]) -> bool:
         return any(term and term in text for term in required_terms)
 
-    async def _stream_text(self, client: OllamaClient, system: str, prompt: str, options: dict) -> str:
+    async def _stream_text(
+        self,
+        client: OllamaClient,
+        system: str,
+        prompt: str,
+        options: dict,
+        images: list[bytes] | None = None,
+    ) -> str:
         tokens: list[str] = []
         async for token in client.generate_stream(
             self.config.ollama_model,
             system,
             prompt,
             options=options,
+            images=images,
         ):
             tokens.append(token)
         return "".join(tokens).strip()
@@ -517,12 +548,13 @@ async def build_apply_checks(payload: dict, config: RuntimeConfig) -> list[dict[
     if changed & {"yolo_model_path", "yolo_pose_model_path"}:
         checks.append({"component": "vision-model", "status": "ok", "message": "YOLO model paths updated and verified."})
 
-    if changed & {"ollama_base_url", "ollama_model", "ollama_timeout_sec"}:
+    if changed & {"ollama_base_url", "ollama_model", "ollama_timeout_sec", "llm_use_person_crop"}:
         client = OllamaClient(config.ollama_base_url, min(config.ollama_timeout_sec, 15))
         try:
             models = await client.list_models()
             if config.ollama_model in models:
-                checks.append({"component": "llm", "status": "ok", "message": f"Ollama reachable and model {config.ollama_model} is available."})
+                mode = "person-crop image mode" if config.llm_use_person_crop else "prompt-only mode"
+                checks.append({"component": "llm", "status": "ok", "message": f"Ollama reachable and model {config.ollama_model} is available. LLM is in {mode}."})
             else:
                 checks.append({"component": "llm", "status": "error", "message": f"Ollama reachable but model {config.ollama_model} was not found."})
         except Exception as exc:

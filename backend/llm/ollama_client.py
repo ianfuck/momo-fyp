@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 from collections.abc import AsyncIterator
 
@@ -44,6 +45,7 @@ class OllamaClient:
         prompt: str,
         options: dict | None = None,
         think: bool | None = False,
+        images: list[bytes] | None = None,
     ) -> AsyncIterator[str]:
         payload = {
             "model": model,
@@ -53,6 +55,8 @@ class OllamaClient:
             "options": options or {},
             "think": think,
         }
+        if images:
+            payload["images"] = [base64.b64encode(image).decode("ascii") for image in images]
         async with httpx.AsyncClient(timeout=self.timeout_sec) as client:
             async with client.stream("POST", f"{self.base_url}/api/generate", json=payload) as response:
                 response.raise_for_status()

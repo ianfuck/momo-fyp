@@ -22,6 +22,7 @@ class PromptBuilder:
         audience: AudienceFeatures,
         event_summary: str,
         reacquired: bool,
+        use_visual_audience: bool = False,
     ) -> dict[str, str | list[str]]:
         stages = load_tracking_examples(selected_examples)
         stage_examples = stages.get(sentence_index, [])
@@ -37,7 +38,6 @@ class PromptBuilder:
             reacquire_lines = "\n".join(
                 f"- 重獲時偏向: {row['event_hint'] or '重新追上目標'}" for row in stages[0]
             )
-        feature_summary = self._summarize_audience(audience)
         system_prompt = (
             f"{self.tracking_system.strip()}\n\n"
             "硬性輸出規則:\n"
@@ -57,9 +57,9 @@ class PromptBuilder:
             f"- 為何選它: {best_reference['event_hint'] or '同一句階段'}\n"
             f"第 {sentence_index} 句階段靈感:\n{style_lines}\n"
             f"{reacquire_lines}\n"
-            f"觀眾特徵摘要: {feature_summary}\n"
+            f"{self._audience_input_line(audience, use_visual_audience)}\n"
             f"即時事件: {event_summary or '無特殊事件'}\n"
-            f"本句觀察優先順序: {self._priority_hint(event_summary, audience)}\n"
+            f"本句觀察優先順序: {self._priority_hint(event_summary, audience, use_visual_audience)}\n"
             "改寫方法:\n"
             "- 先把 reference 句當底稿\n"
             "- 只替換其中的顏色、體型、動作、距離、身體部位或形容詞\n"
@@ -80,7 +80,7 @@ class PromptBuilder:
         return {
             "system": system_prompt,
             "user": user_prompt,
-            "required_terms": self._required_terms(event_summary, audience),
+            "required_terms": self._required_terms(event_summary, audience, use_visual_audience),
         }
 
     def build_idle_prompt(self, selected_examples: list[str], idle_duration_ms: int) -> dict[str, str | list[str]]:
@@ -109,15 +109,22 @@ class PromptBuilder:
             parts.append(f"清晰度{audience.focus_score:.2f}")
         return "、".join(parts)
 
-    def _priority_hint(self, event_summary: str, audience: AudienceFeatures) -> str:
+    def _audience_input_line(self, audience: AudienceFeatures, use_visual_audience: bool) -> str:
+        if use_visual_audience:
+            return "觀眾特徵來源: 請直接根據提供的人像 crop 圖，自行判讀觀眾的顏色、體型、距離、姿態與可見身體線索，再完成改寫。"
+        return f"觀眾特徵摘要: {self._summarize_audience(audience)}"
+
+    def _priority_hint(self, event_summary: str, audience: AudienceFeatures, use_visual_audience: bool = False) -> str:
         if event_summary and event_summary != "無":
             return f"先寫事件「{event_summary}」，再補一個外觀或距離特徵"
+        if use_visual_audience:
+            return "優先從 crop 圖判斷距離感，再從上衣顏色或體型擇一補充"
         return (
             f"優先寫距離{DISTANCE_LABELS.get(audience.distance_class, audience.distance_class)}，"
             f"再從上衣{audience.top_color}或{BUILD_LABELS.get(audience.build_class, audience.build_class)}擇一補充"
         )
 
-    def _required_terms(self, event_summary: str, audience: AudienceFeatures) -> list[str]:
+    def _required_terms(self, event_summary: str, audience: AudienceFeatures, use_visual_audience: bool = False) -> list[str]:
         if event_summary and event_summary != "無":
             keywords: list[str] = []
             if "揮手" in event_summary:
@@ -131,6 +138,8 @@ class PromptBuilder:
             if "遠離" in event_summary:
                 keywords.extend(["遠", "退"])
             return list(dict.fromkeys(keywords))
+        if use_visual_audience:
+            return []
         return [audience.top_color, DISTANCE_LABELS.get(audience.distance_class, audience.distance_class)]
 
     def _pick_best_reference(
