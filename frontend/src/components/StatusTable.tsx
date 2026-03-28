@@ -24,6 +24,7 @@ export function StatusTable({
           <tr><th>Distance</th><td>{status.audience.distance_class}</td></tr>
           <tr><th>Area Ratio</th><td>{status.audience.bbox_area_ratio.toFixed(3)}</td></tr>
           <tr><th>Eye Confidence</th><td>{status.audience.eye_confidence.toFixed(2)}</td></tr>
+          <tr><th>Pose Confidence</th><td>{status.audience.pose_confidence.toFixed(2)}</td></tr>
           <tr><th>Events</th><td>{activeEvents}</td></tr>
           <tr><th>Servo</th><td>L {status.servo.left_deg} / R {status.servo.right_deg}</td></tr>
           <tr><th>Tracking Source</th><td>{status.servo.tracking_source}</td></tr>

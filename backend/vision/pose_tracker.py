@@ -10,6 +10,15 @@ from backend.device_utils import backend_label_for_device, get_vision_device
 
 @dataclass
 class PoseSignals:
+    nose_point: list[float] | None = None
+    left_shoulder_point: list[float] | None = None
+    right_shoulder_point: list[float] | None = None
+    left_elbow_point: list[float] | None = None
+    right_elbow_point: list[float] | None = None
+    left_wrist_point: list[float] | None = None
+    right_wrist_point: list[float] | None = None
+    left_hip_point: list[float] | None = None
+    right_hip_point: list[float] | None = None
     shoulder_y_norm: float | None = None
     hip_y_norm: float | None = None
     left_wrist_x_norm: float | None = None
@@ -56,7 +65,25 @@ class PoseTracker:
         if keypoints.shape[0] < 15:
             return PoseSignals()
         frame_height, frame_width = frame.shape[:2]
+        nose_point = _norm_point(keypoints, 0, x1, y1, frame_width, frame_height)
+        left_shoulder_point = _norm_point(keypoints, 5, x1, y1, frame_width, frame_height)
+        right_shoulder_point = _norm_point(keypoints, 6, x1, y1, frame_width, frame_height)
+        left_elbow_point = _norm_point(keypoints, 7, x1, y1, frame_width, frame_height)
+        right_elbow_point = _norm_point(keypoints, 8, x1, y1, frame_width, frame_height)
+        left_wrist_point = _norm_point(keypoints, 9, x1, y1, frame_width, frame_height)
+        right_wrist_point = _norm_point(keypoints, 10, x1, y1, frame_width, frame_height)
+        left_hip_point = _norm_point(keypoints, 11, x1, y1, frame_width, frame_height)
+        right_hip_point = _norm_point(keypoints, 12, x1, y1, frame_width, frame_height)
         return PoseSignals(
+            nose_point=nose_point,
+            left_shoulder_point=left_shoulder_point,
+            right_shoulder_point=right_shoulder_point,
+            left_elbow_point=left_elbow_point,
+            right_elbow_point=right_elbow_point,
+            left_wrist_point=left_wrist_point,
+            right_wrist_point=right_wrist_point,
+            left_hip_point=left_hip_point,
+            right_hip_point=right_hip_point,
             shoulder_y_norm=_avg_norm_y(keypoints, [5, 6], x1, y1, frame_height),
             hip_y_norm=_avg_norm_y(keypoints, [11, 12], x1, y1, frame_height),
             left_wrist_x_norm=_norm_x(keypoints, 9, x1, frame_width),
@@ -87,6 +114,22 @@ def _avg_norm_y(keypoints: np.ndarray, indices: list[int], offset_x: int, offset
     if not present:
         return None
     return float(sum(present) / len(present))
+
+
+def _norm_point(
+    keypoints: np.ndarray,
+    idx: int,
+    offset_x: int,
+    offset_y: int,
+    frame_width: int,
+    frame_height: int,
+) -> list[float] | None:
+    if keypoints[idx, 2] < 0.2:
+        return None
+    return [
+        float((offset_x + keypoints[idx, 0]) / max(1, frame_width)),
+        float((offset_y + keypoints[idx, 1]) / max(1, frame_height)),
+    ]
 
 
 def _expand_bbox(bbox: list[int], frame_shape: tuple[int, ...], pad_x_ratio: float = 0.25, pad_y_ratio: float = 0.15) -> list[int]:

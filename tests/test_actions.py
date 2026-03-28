@@ -42,3 +42,21 @@ def test_crouch_detection_uses_pose_height_change():
         )
     assert action is not None
     assert action.crouch is True
+
+
+def test_head_motion_alone_does_not_trigger_wave():
+    tracker = MotionTracker()
+    action = None
+    for eye_x in [0.41, 0.57, 0.43, 0.58, 0.42, 0.56]:
+        action = tracker.update(
+            area_ratio=0.2,
+            center_y_norm=0.5,
+            eye_x_norm=eye_x,
+            pose=PoseSignals(shoulder_y_norm=0.32, pose_confidence=0.8),
+            focus_score=0.9,
+            defocus_threshold=0.42,
+            focus_score_threshold=0.25,
+            crouch_delta_threshold=0.18,
+        )
+    assert action is not None
+    assert action.wave is False

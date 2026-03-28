@@ -54,6 +54,7 @@ class AudienceFeatures(BaseModel):
     right_eye_bbox: list[int] | None = None
     eye_midpoint: list[float] | None = None
     eye_confidence: float = 0.0
+    pose_keypoints: dict[str, list[float] | None] = Field(default_factory=dict)
     left_wrist_point: list[float] | None = None
     right_wrist_point: list[float] | None = None
     pose_confidence: float = 0.0

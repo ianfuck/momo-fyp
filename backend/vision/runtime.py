@@ -233,6 +233,17 @@ class VisionRuntime:
             right_eye_bbox=face.right_eye_bbox,
             eye_midpoint=face.eye_midpoint,
             eye_confidence=face.eye_confidence,
+            pose_keypoints={
+                "nose": pose.nose_point,
+                "left_shoulder": pose.left_shoulder_point,
+                "right_shoulder": pose.right_shoulder_point,
+                "left_elbow": pose.left_elbow_point,
+                "right_elbow": pose.right_elbow_point,
+                "left_wrist": pose.left_wrist_point,
+                "right_wrist": pose.right_wrist_point,
+                "left_hip": pose.left_hip_point,
+                "right_hip": pose.right_hip_point,
+            },
             left_wrist_point=[round(pose.left_wrist_x_norm, 4), round(pose.left_wrist_y_norm, 4)]
             if pose.left_wrist_x_norm is not None and pose.left_wrist_y_norm is not None
             else None,

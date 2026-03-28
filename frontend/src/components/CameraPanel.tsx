@@ -98,6 +98,7 @@ export function CameraPanel({ status, cameraDeviceId, width = 1280, height = 720
         <video ref={videoRef} className="camera-video" playsInline muted />
         <canvas ref={canvasRef} className="camera-hidden" />
         <div className="camera-stream">
+          <SkeletonOverlay points={status.audience.pose_keypoints} />
           {status.audience.person_bbox && <Box bbox={status.audience.person_bbox} width={width} height={height} label="Person" className="person-bbox" />}
           {status.audience.face_bbox && <Box bbox={status.audience.face_bbox} width={width} height={height} label="Face" className="face-bbox" />}
           {status.audience.left_eye_bbox && <Box bbox={status.audience.left_eye_bbox} width={width} height={height} label="L Eye" className="eye-bbox left-eye" />}
@@ -124,6 +125,71 @@ export function CameraPanel({ status, cameraDeviceId, width = 1280, height = 720
   );
 }
 
+function SkeletonOverlay({ points }: { points: Record<string, [number, number] | null> }) {
+  const segments: Array<[string, string]> = [
+    ["nose", "left_shoulder"],
+    ["nose", "right_shoulder"],
+    ["left_shoulder", "right_shoulder"],
+    ["left_shoulder", "left_elbow"],
+    ["left_elbow", "left_wrist"],
+    ["right_shoulder", "right_elbow"],
+    ["right_elbow", "right_wrist"],
+    ["left_shoulder", "left_hip"],
+    ["right_shoulder", "right_hip"],
+    ["left_hip", "right_hip"],
+  ];
+
+  return (
+    <>
+      <svg className="skeleton-overlay" viewBox="0 0 100 100" preserveAspectRatio="none">
+        {segments.map(([from, to]) => {
+          const start = points[from];
+          const end = points[to];
+          if (!start || !end) return null;
+          return (
+            <line
+              key={`${from}-${to}`}
+              x1={start[0] * 100}
+              y1={start[1] * 100}
+              x2={end[0] * 100}
+              y2={end[1] * 100}
+              className="skeleton-line"
+            />
+          );
+        })}
+      </svg>
+      {Object.entries(points).map(([name, point]) =>
+        point ? <Point key={name} point={point} label={labelForKeypoint(name)} className={`point keypoint ${name}`} /> : null,
+      )}
+    </>
+  );
+}
+
+function labelForKeypoint(name: string) {
+  switch (name) {
+    case "left_wrist":
+      return "L Wrist";
+    case "right_wrist":
+      return "R Wrist";
+    case "left_elbow":
+      return "L Elbow";
+    case "right_elbow":
+      return "R Elbow";
+    case "left_shoulder":
+      return "L Shoulder";
+    case "right_shoulder":
+      return "R Shoulder";
+    case "left_hip":
+      return "L Hip";
+    case "right_hip":
+      return "R Hip";
+    case "nose":
+      return "Nose";
+    default:
+      return name;
+  }
+}
+
 function Point({
   point,
   label,
@@ -132,6 +198,7 @@ function Point({
   point: [number, number];
   label: string;
   className: string;
+  compact?: boolean;
 }) {
   const [x, y] = point;
   return (

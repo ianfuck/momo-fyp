@@ -11,7 +11,6 @@ from backend.vision.pose_tracker import PoseSignals
 class MotionTracker:
     area_history: deque[float] = field(default_factory=lambda: deque(maxlen=8))
     center_y_history: deque[float] = field(default_factory=lambda: deque(maxlen=8))
-    eye_x_history: deque[float] = field(default_factory=lambda: deque(maxlen=12))
     shoulder_y_history: deque[float] = field(default_factory=lambda: deque(maxlen=10))
     left_wrist_x_history: deque[float] = field(default_factory=lambda: deque(maxlen=10))
     right_wrist_x_history: deque[float] = field(default_factory=lambda: deque(maxlen=10))
@@ -29,7 +28,6 @@ class MotionTracker:
     ) -> ActionFlags:
         self.area_history.append(area_ratio)
         self.center_y_history.append(center_y_norm)
-        self.eye_x_history.append(eye_x_norm)
         actions = ActionFlags()
 
         if len(self.area_history) >= 2:
@@ -56,10 +54,6 @@ class MotionTracker:
         if pose and pose.shoulder_y_norm is not None and len(self.shoulder_y_history) >= 4:
             shoulder_delta = self.shoulder_y_history[-1] - min(self.shoulder_y_history)
             actions.crouch = actions.crouch or shoulder_delta > crouch_delta_threshold * 0.7
-
-        if not actions.wave and len(self.eye_x_history) >= 6:
-            span = max(self.eye_x_history) - min(self.eye_x_history)
-            actions.wave = span > 0.08
 
         actions.defocus = area_ratio >= defocus_threshold or focus_score < focus_score_threshold
         return actions

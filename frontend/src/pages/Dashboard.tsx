@@ -29,6 +29,7 @@ const initialStatus: StatusSnapshot = {
     bbox_area_ratio: 0,
     eye_midpoint: null,
     eye_confidence: 0,
+    pose_keypoints: {},
     left_wrist_point: null,
     right_wrist_point: null,
     pose_confidence: 0,

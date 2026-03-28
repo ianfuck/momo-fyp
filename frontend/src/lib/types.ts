@@ -33,6 +33,7 @@ export type StatusSnapshot = {
     bbox_area_ratio: number;
     eye_midpoint?: [number, number] | null;
     eye_confidence: number;
+    pose_keypoints: Record<string, [number, number] | null>;
     left_wrist_point?: [number, number] | null;
     right_wrist_point?: [number, number] | null;
     pose_confidence: number;
