@@ -23,9 +23,62 @@ from backend.servo.geometry import compute_servo_angles
 from backend.state_machine import RuntimeState
 from backend.storage.csv_logger import append_audience_snapshot
 from backend.telemetry.system_stats import get_system_stats
-from backend.tts.qwen_clone import QwenCloneTTS
+from backend.tts.qwen_clone import FishCloneTTS
 from backend.types import ConfigUpdateResponse, PipelineStage, RuntimeConfig, SystemMode
 from backend.vision.runtime import VisionRuntime
+
+TTS_EMOTION_TAGS = (
+    "happy",
+    "sad",
+    "angry",
+    "excited",
+    "calm",
+    "nervous",
+    "confident",
+    "surprised",
+    "satisfied",
+    "delighted",
+    "scared",
+    "worried",
+    "upset",
+    "frustrated",
+    "depressed",
+    "empathetic",
+    "embarrassed",
+    "disgusted",
+    "moved",
+    "proud",
+    "relaxed",
+    "grateful",
+    "curious",
+    "sarcastic",
+    "disdainful",
+    "unhappy",
+    "anxious",
+    "hysterical",
+    "indifferent",
+    "uncertain",
+    "doubtful",
+    "confused",
+    "disappointed",
+    "regretful",
+    "guilty",
+    "ashamed",
+    "jealous",
+    "envious",
+    "hopeful",
+    "optimistic",
+    "pessimistic",
+    "nostalgic",
+    "lonely",
+    "bored",
+    "contemptuous",
+    "sympathetic",
+    "compassionate",
+    "determined",
+    "resigned",
+)
+DEFAULT_TTS_EMOTION = "confident"
 
 
 class Brain:
@@ -35,7 +88,12 @@ class Brain:
         self.prompts = PromptBuilder("resource/md/system-persona_tracking.md", "resource/md/system-persona_idle.md")
         self.resources = ResourceManager("tmp")
         self.audio = AudioPlayer()
-        self.tts = QwenCloneTTS(self.config.tts_model_path, self.config.tts_ref_audio_path, self.config.tts_ref_text_path)
+        self.tts = FishCloneTTS(
+            self.config.tts_model_path,
+            self.config.tts_ref_audio_path,
+            self.config.tts_ref_text_path,
+            clone_voice_enabled=self.config.tts_clone_voice_enabled,
+        )
         self.serial = ESP32Link(self.config.serial_port, self.config.serial_baud_rate)
         self.vision = VisionRuntime(self.config)
         self.history: deque[str] = deque(maxlen=10)
@@ -66,7 +124,12 @@ class Brain:
 
     def _prepare_runtime_models(self) -> None:
         ensure_runtime_models(self.config)
-        self.tts = QwenCloneTTS(self.config.tts_model_path, self.config.tts_ref_audio_path, self.config.tts_ref_text_path)
+        self.tts = FishCloneTTS(
+            self.config.tts_model_path,
+            self.config.tts_ref_audio_path,
+            self.config.tts_ref_text_path,
+            clone_voice_enabled=self.config.tts_clone_voice_enabled,
+        )
         try:
             self.tts.preload()
         except Exception as exc:
@@ -474,9 +537,20 @@ class Brain:
     async def _speak_line(self, text: str) -> None:
         self.state.set_pipeline_stage(PipelineStage.TTS)
         started = time.monotonic()
+        if self.config.tts_emotion_enabled:
+            emotion_raw, emotion = await self._classify_tts_emotion(text)
+            tts_text = self._apply_tts_emotion(text, emotion)
+        else:
+            emotion_raw = None
+            emotion = None
+            tts_text = text
+        self.state.tts_emotion_raw = emotion_raw
+        self.state.tts_emotion_applied = emotion
+        self.state.tts_emotion_used = bool(emotion)
+        self.state.tts_input_text = tts_text
         try:
             output = await asyncio.wait_for(
-                asyncio.to_thread(self.tts.synthesize, text, "tmp/generated.wav"),
+                asyncio.to_thread(self.tts.synthesize, tts_text, "tmp/generated.wav"),
                 timeout=self.config.tts_timeout_sec,
             )
         except asyncio.TimeoutError as exc:
@@ -488,6 +562,67 @@ class Brain:
         self.audio.set_output_device(self.config.audio_output_device)
         self.audio.play(output, volume=self.config.tts_output_volume)
         self.state.last_spoken_text = text
+
+    async def _classify_tts_emotion(self, text: str) -> tuple[str, str]:
+        client = OllamaClient(self.config.ollama_base_url, min(self.config.ollama_timeout_sec, 15))
+        prompt = (
+            "你是 TTS 情緒標記分類器。"
+            "以下是 Fish Audio S1 支援的情緒標記。"
+            f"你必須只從這個清單選一個最適合該句子的標記並直接輸出，不要解釋：{', '.join(TTS_EMOTION_TAGS)}。\n"
+            "每句都一定要有情緒，不可輸出 none、neutral、tone、very、extremely 或其他清單外文字。\n"
+            "只可輸出清單中的單一精確 tag，不可加任何修飾詞。\n"
+            f"句子：{text}"
+        )
+        try:
+            raw = await asyncio.wait_for(
+                self._stream_text(
+                    client,
+                    "只輸出一個標記名稱。",
+                    prompt,
+                    {
+                        "num_predict": 12,
+                        "temperature": 0,
+                        "top_p": 0.2,
+                        "repeat_penalty": 1.0,
+                        "stop": ["\n", "。", ","],
+                    },
+                ),
+                timeout=min(self.config.ollama_timeout_sec, 15),
+            )
+        except Exception:
+            fallback = self._fallback_tts_emotion(text)
+            return fallback, fallback
+        candidate = self._clean_tts_emotion(raw) or DEFAULT_TTS_EMOTION
+        normalized = self._normalize_tts_emotion(candidate)
+        if normalized is None:
+            normalized = self._fallback_tts_emotion(text)
+        return candidate, normalized
+
+    def _clean_tts_emotion(self, raw: str) -> str | None:
+        cleaned = raw.strip().strip("()[]{}<>\"'`.,，。!！？").lower().replace("_", " ")
+        cleaned = " ".join(cleaned.split())
+        return cleaned or None
+
+    def _normalize_tts_emotion(self, raw: str) -> str | None:
+        cleaned = self._clean_tts_emotion(raw)
+        return cleaned if cleaned in TTS_EMOTION_TAGS else None
+
+    def _fallback_tts_emotion(self, text: str) -> str:
+        lowered = text.lower()
+        if any(token in lowered for token in ("怒", "氣", "恨", "煩", "滾", "閉嘴", "討厭")):
+            return "angry"
+        if any(token in lowered for token in ("哭", "難過", "悲", "孤獨", "寂寞", "抱歉", "遺憾", "失望")):
+            return "sad"
+        if any(token in lowered for token in ("怕", "危險", "小心", "糟", "怎麼辦")):
+            return "worried"
+        if any(token in lowered for token in ("?", "？", "嗎", "呢", "為什麼", "怎樣")):
+            return "curious"
+        if any(token in lowered for token in ("!", "！", "太棒", "好耶", "快", "立刻")):
+            return "excited"
+        return DEFAULT_TTS_EMOTION
+
+    def _apply_tts_emotion(self, text: str, emotion: str) -> str:
+        return f"({emotion}) {text}"
 
     def _event_summary(self) -> str:
         actions = self.state.audience.actions
@@ -561,21 +696,24 @@ async def build_apply_checks(payload: dict, config: RuntimeConfig) -> list[dict[
         except Exception as exc:
             checks.append({"component": "llm", "status": "error", "message": f"Ollama check failed: {exc}"})
 
-    if changed & {"tts_model_path", "tts_ref_audio_path", "tts_ref_text_path", "tts_timeout_sec"}:
+    if changed & {"tts_model_path", "tts_emotion_enabled", "tts_clone_voice_enabled", "tts_ref_audio_path", "tts_ref_text_path", "tts_timeout_sec"}:
         errors: list[str] = []
         model_path = brain.tts.model_path if hasattr(brain.tts.model_path, "exists") else Path(brain.tts.model_path)
         ref_audio_path = brain.tts.ref_audio_path if hasattr(brain.tts.ref_audio_path, "exists") else Path(brain.tts.ref_audio_path)
         ref_text_path = brain.tts.ref_text_path if hasattr(brain.tts.ref_text_path, "exists") else Path(brain.tts.ref_text_path)
         if not model_path.exists():
             errors.append(f"missing model path: {model_path}")
-        if not ref_audio_path.exists():
-            errors.append(f"missing ref audio: {ref_audio_path}")
-        if not ref_text_path.exists():
-            errors.append(f"missing ref transcript: {ref_text_path}")
+        if config.tts_clone_voice_enabled:
+            if not ref_audio_path.exists():
+                errors.append(f"missing ref audio: {ref_audio_path}")
+            if not ref_text_path.exists():
+                errors.append(f"missing ref transcript: {ref_text_path}")
         if errors:
             checks.append({"component": "tts", "status": "error", "message": "; ".join(errors)})
         else:
-            checks.append({"component": "tts", "status": "ok", "message": f"TTS ready. Timeout set to {config.tts_timeout_sec * 1000} ms."})
+            mode = "clone voice" if config.tts_clone_voice_enabled else "normal TTS"
+            emotion_mode = "emotion on" if config.tts_emotion_enabled else "emotion off"
+            checks.append({"component": "tts", "status": "ok", "message": f"TTS ready in {mode}, {emotion_mode}. Timeout set to {config.tts_timeout_sec * 1000} ms."})
 
     if changed & {"audio_output_device", "tts_output_volume"}:
         available_ids = {item["id"] for item in AudioPlayer.list_output_devices()}
@@ -698,7 +836,12 @@ async def update_config(payload: dict):
     changed = [key for key, value in payload.items() if getattr(brain.config, key) != value]
     brain.config = merged
     brain.serial = ESP32Link(brain.config.serial_port, brain.config.serial_baud_rate)
-    brain.tts = QwenCloneTTS(brain.config.tts_model_path, brain.config.tts_ref_audio_path, brain.config.tts_ref_text_path)
+    brain.tts = FishCloneTTS(
+        brain.config.tts_model_path,
+        brain.config.tts_ref_audio_path,
+        brain.config.tts_ref_text_path,
+        clone_voice_enabled=brain.config.tts_clone_voice_enabled,
+    )
     brain.vision.reconfigure(brain.config)
     apply_checks = await build_apply_checks(payload, brain.config)
     return ConfigUpdateResponse(

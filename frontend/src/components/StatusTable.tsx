@@ -35,6 +35,10 @@ export function StatusTable({
           <tr><th>TTS Timeout</th><td>{Number(config.tts_timeout_sec ?? 0) * 1000 || "-"} ms</td></tr>
           <tr><th>LLM Latency</th><td>{status.llm_latency_ms ?? "-"} ms</td></tr>
           <tr><th>TTS Latency</th><td>{status.tts_latency_ms ?? "-"} ms</td></tr>
+          <tr><th>Ollama TTS Emotion</th><td>{status.tts_emotion_raw ?? "-"}</td></tr>
+          <tr><th>Fish TTS Emotion</th><td>{status.tts_emotion_applied ?? "-"}</td></tr>
+          <tr><th>Emotion Applied</th><td>{status.tts_emotion_used ? "yes" : "no"}</td></tr>
+          <tr><th>Fish Input Text</th><td>{status.tts_input_text ?? "-"}</td></tr>
           <tr><th>LLM Output</th><td>{status.last_llm_output ?? "-"}</td></tr>
           <tr><th>Spoken Text</th><td>{status.last_spoken_text ?? "-"}</td></tr>
           <tr><th>Pipeline Error</th><td>{status.pipeline.last_error ?? "-"}</td></tr>

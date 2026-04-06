@@ -1,0 +1,5 @@
+Metadata-Version: 2.4
+Name: pyaudio
+Version: 0.2.14
+Summary: Local stub used to satisfy Fish Speech's optional pyaudio dependency.
+Requires-Python: >=3.11

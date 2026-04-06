@@ -15,7 +15,8 @@ def _configure_windows_cuda_memory_fraction(torch) -> None:
     if not torch.cuda.is_available():
         return
     try:
-        torch.cuda.set_per_process_memory_fraction(0.999, 0)
+        fraction = float(os.getenv("MOMO_CUDA_MEMORY_FRACTION", "0.72"))
+        torch.cuda.set_per_process_memory_fraction(min(max(fraction, 0.1), 0.98), 0)
     except Exception:
         return
     _WINDOWS_CUDA_MEMORY_CONFIGURED = True
@@ -44,7 +45,6 @@ def get_vision_device() -> str:
     if override:
         return override
     if platform.system() == "Darwin":
-        # torch 2.4.1 + MPS produces truncated YOLO boxes on live browser frames.
         return "cpu"
     return get_torch_device()
 
@@ -54,8 +54,6 @@ def expected_accelerator_label() -> str:
 
 
 def get_tts_device() -> str:
-    if platform.system() == "Windows":
-        return "cpu"
     return get_torch_device()
 
 

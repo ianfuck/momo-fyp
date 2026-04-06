@@ -1,20 +1,21 @@
 [project]
 name = "momo"
 version = "0.1.0"
-description = "Interactive audience tracking MVP with Ollama, Qwen TTS, and ESP32 SG90 eyes"
+description = "Interactive audience tracking MVP with Ollama, Fish Audio S1 Mini TTS, and ESP32 SG90 eyes"
 readme = "README.md"
 requires-python = ">=3.11,<3.13"
 dependencies = [
   "fastapi>=0.116.0",
+  "fish-speech==0.1.0",
   "huggingface-hub>=0.34.0",
   "httpx>=0.28.0",
   "lap>=0.5.13",
-  "opencv-python>=4.13.0.92",
+  "opencv-python>=4.11.0.86,<4.12",
   "psutil>=7.0.0",
+  "pyaudio==0.2.14",
   "pydantic-settings>=2.10.0",
   "pyserial>=3.5",
   "python-multipart>=0.0.20",
-  "qwen-tts>=0.1.1",
   "sounddevice>=0.5.5",
   "soundfile>=0.13.1",
   "torch==2.4.1",
@@ -37,6 +38,7 @@ testpaths = ["tests"]
 package = false
 
 [tool.uv.sources]
+pyaudio = { path = "vendor/pyaudio_stub" }
 torch = [
   { index = "pytorch-cu118", marker = "sys_platform == 'win32'" },
 ]

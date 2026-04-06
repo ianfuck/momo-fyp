@@ -26,6 +26,10 @@ class RuntimeState:
     event_log: list[str] = field(default_factory=list)
     llm_latency_ms: int | None = None
     tts_latency_ms: int | None = None
+    tts_emotion_raw: str | None = None
+    tts_emotion_applied: str | None = None
+    tts_emotion_used: bool = False
+    tts_input_text: str | None = None
     current_prompt_system: str | None = None
     current_prompt_user: str | None = None
     last_llm_output: str | None = None
@@ -77,6 +81,10 @@ class RuntimeState:
             servo=self.servo,
             llm_latency_ms=self.llm_latency_ms,
             tts_latency_ms=self.tts_latency_ms,
+            tts_emotion_raw=self.tts_emotion_raw,
+            tts_emotion_applied=self.tts_emotion_applied,
+            tts_emotion_used=self.tts_emotion_used,
+            tts_input_text=self.tts_input_text,
             current_prompt_system=self.current_prompt_system,
             current_prompt_user=self.current_prompt_user,
             last_llm_output=self.last_llm_output,

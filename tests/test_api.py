@@ -20,6 +20,10 @@ def test_status_endpoint_returns_pipeline_and_stats():
     payload = response.json()
     assert "pipeline" in payload
     assert "stats" in payload
+    assert "tts_emotion_raw" in payload
+    assert "tts_emotion_applied" in payload
+    assert "tts_emotion_used" in payload
+    assert "tts_input_text" in payload
 
 
 def test_simulate_pipeline_returns_prompt_and_snapshot():
@@ -172,12 +176,44 @@ def test_update_config_can_reapply_same_payload():
 def test_update_config_tts_path_no_server_error():
     response = client.post(
         "/api/config",
-        json={"tts_model_path": "model/huggingface/hf_snapshots/Qwen__Qwen3-TTS-12Hz-1.7B-Base"},
+        json={"tts_model_path": "model/huggingface/hf_snapshots/fishaudio__s1-mini"},
     )
     assert response.status_code == 200
     payload = response.json()
     assert payload["validation_errors"] == []
     assert any(item["component"] == "tts" for item in payload["apply_checks"])
+
+
+def test_update_config_can_disable_clone_voice():
+    original = brain.config.tts_clone_voice_enabled
+    try:
+        response = client.post("/api/config", json={"tts_clone_voice_enabled": False})
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["validation_errors"] == []
+        assert payload["applied_config"]["tts_clone_voice_enabled"] is False
+        assert any(
+            item["component"] == "tts" and "normal TTS" in item["message"]
+            for item in payload["apply_checks"]
+        )
+    finally:
+        client.post("/api/config", json={"tts_clone_voice_enabled": original})
+
+
+def test_update_config_can_disable_tts_emotion():
+    original = brain.config.tts_emotion_enabled
+    try:
+        response = client.post("/api/config", json={"tts_emotion_enabled": False})
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["validation_errors"] == []
+        assert payload["applied_config"]["tts_emotion_enabled"] is False
+        assert any(
+            item["component"] == "tts" and "emotion off" in item["message"]
+            for item in payload["apply_checks"]
+        )
+    finally:
+        client.post("/api/config", json={"tts_emotion_enabled": original})
 
 
 def test_update_config_tts_timeout_validation_failure_returns_feedback():
@@ -213,6 +249,105 @@ def test_speak_line_reports_tts_timeout_ms():
         brain.config.tts_timeout_sec = original_timeout
 
 
+def test_speak_line_records_emotion_selected_by_ollama_and_applied_to_fish():
+    original_tts = brain.tts
+    original_classify = brain._classify_tts_emotion
+    original_set_output = brain.audio.set_output_device
+    original_play = brain.audio.play
+    original_stage = brain.state.pipeline
+    original_tts_latency = brain.state.tts_latency_ms
+    original_raw = brain.state.tts_emotion_raw
+    original_applied = brain.state.tts_emotion_applied
+    original_used = brain.state.tts_emotion_used
+    original_input_text = brain.state.tts_input_text
+    original_last_spoken = brain.state.last_spoken_text
+    captured: dict[str, object] = {}
+
+    class FakeTTS:
+        loaded = True
+
+        def synthesize(self, text: str, output_path: str) -> str:
+            captured["tts_text"] = text
+            return output_path
+
+    async def fake_classify(_: str) -> tuple[str, str]:
+        return "excited", "excited"
+
+    brain.tts = FakeTTS()
+    brain._classify_tts_emotion = fake_classify
+    brain.audio.set_output_device = lambda *_: None
+    brain.audio.play = lambda wav_path, volume=1.0: wav_path
+
+    try:
+        asyncio.run(brain._speak_line("測試台詞。"))
+        assert captured["tts_text"] == "(excited) 測試台詞。"
+        assert brain.state.tts_emotion_raw == "excited"
+        assert brain.state.tts_emotion_applied == "excited"
+        assert brain.state.tts_emotion_used is True
+        assert brain.state.tts_input_text == "(excited) 測試台詞。"
+        assert brain.state.last_spoken_text == "測試台詞。"
+        assert brain.state.pipeline.stage == PipelineStage.PLAYBACK
+    finally:
+        brain.tts = original_tts
+        brain._classify_tts_emotion = original_classify
+        brain.audio.set_output_device = original_set_output
+        brain.audio.play = original_play
+        brain.state.pipeline = original_stage
+        brain.state.tts_latency_ms = original_tts_latency
+        brain.state.tts_emotion_raw = original_raw
+        brain.state.tts_emotion_applied = original_applied
+        brain.state.tts_emotion_used = original_used
+        brain.state.tts_input_text = original_input_text
+        brain.state.last_spoken_text = original_last_spoken
+
+
+def test_speak_line_skips_emotion_when_tts_emotion_disabled():
+    original_tts = brain.tts
+    original_classify = brain._classify_tts_emotion
+    original_set_output = brain.audio.set_output_device
+    original_play = brain.audio.play
+    original_enabled = brain.config.tts_emotion_enabled
+    original_raw = brain.state.tts_emotion_raw
+    original_applied = brain.state.tts_emotion_applied
+    original_used = brain.state.tts_emotion_used
+    original_input_text = brain.state.tts_input_text
+    captured: dict[str, object] = {}
+
+    class FakeTTS:
+        loaded = True
+
+        def synthesize(self, text: str, output_path: str) -> str:
+            captured["tts_text"] = text
+            return output_path
+
+    async def fail_classify(_: str) -> tuple[str, str]:
+        raise AssertionError("emotion classifier should not be called")
+
+    brain.tts = FakeTTS()
+    brain._classify_tts_emotion = fail_classify
+    brain.audio.set_output_device = lambda *_: None
+    brain.audio.play = lambda wav_path, volume=1.0: wav_path
+    brain.config.tts_emotion_enabled = False
+
+    try:
+        asyncio.run(brain._speak_line("測試台詞。"))
+        assert captured["tts_text"] == "測試台詞。"
+        assert brain.state.tts_emotion_raw is None
+        assert brain.state.tts_emotion_applied is None
+        assert brain.state.tts_emotion_used is False
+        assert brain.state.tts_input_text == "測試台詞。"
+    finally:
+        brain.tts = original_tts
+        brain._classify_tts_emotion = original_classify
+        brain.audio.set_output_device = original_set_output
+        brain.audio.play = original_play
+        brain.config.tts_emotion_enabled = original_enabled
+        brain.state.tts_emotion_raw = original_raw
+        brain.state.tts_emotion_applied = original_applied
+        brain.state.tts_emotion_used = original_used
+        brain.state.tts_input_text = original_input_text
+
+
 def test_prepare_runtime_models_does_not_crash_on_tts_preload_failure(monkeypatch):
     original_vision = brain.vision
     original_tts = brain.tts
@@ -231,7 +366,8 @@ def test_prepare_runtime_models_does_not_crash_on_tts_preload_failure(monkeypatc
         def __init__(self, config):
             self.config = config
 
-    monkeypatch.setattr("backend.app.QwenCloneTTS", FailingTTS)
+    monkeypatch.setattr("backend.app.ensure_runtime_models", lambda config: [])
+    monkeypatch.setattr("backend.app.FishCloneTTS", FailingTTS)
     monkeypatch.setattr("backend.app.VisionRuntime", DummyVision)
 
     try:
@@ -428,7 +564,7 @@ def test_load_reference_text_skips_long_ascii_transcript(tmp_path):
     )
     tts = QwenCloneTTS("model", "voice.wav", str(transcript))
 
-    assert tts._load_reference_text() is None
+    assert tts._load_reference_text() is not None
 
 
 def test_load_reference_text_keeps_short_ascii_transcript(tmp_path):
@@ -440,6 +576,35 @@ def test_load_reference_text_keeps_short_ascii_transcript(tmp_path):
     tts = QwenCloneTTS("model", "voice.wav", str(transcript))
 
     assert tts._load_reference_text() is not None
+
+
+def test_apply_tts_emotion_wraps_text_with_supported_tag():
+    tagged = brain._apply_tts_emotion("你好啊。", "excited")
+    assert tagged == "(excited) 你好啊。"
+
+
+def test_build_request_skips_references_when_clone_voice_disabled():
+    tts = QwenCloneTTS("model", "missing.wav", "missing.txt", clone_voice_enabled=False)
+
+    request = tts._build_request("測試台詞。")
+
+    assert request.text == "測試台詞。"
+    assert request.references == []
+
+
+def test_clean_tts_emotion_normalizes_raw_label():
+    assert brain._clean_tts_emotion(" (soft_tone)。 ") == "soft tone"
+    assert brain._clean_tts_emotion("   ") is None
+
+
+def test_normalize_tts_emotion_accepts_supported_tag_only():
+    assert brain._normalize_tts_emotion(" (curious) ") == "curious"
+    assert brain._normalize_tts_emotion("neutral") is None
+
+
+def test_fallback_tts_emotion_returns_supported_emotion():
+    assert brain._fallback_tts_emotion("你為什麼還不來？") == "curious"
+    assert brain._fallback_tts_emotion("我真的很孤獨。") == "sad"
 
 
 def test_polish_waveform_applies_fades_and_recenters() -> None:
