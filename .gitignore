@@ -36,9 +36,7 @@ tmp/
 *.err
 
 # Generated media
-*.wav
 *.aiff
-*.mp3
 *.mp4
 
 # Local tools / transcripts
