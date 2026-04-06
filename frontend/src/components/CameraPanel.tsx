@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { uploadCameraFrame } from "../lib/api";
 import type { StatusSnapshot } from "../lib/types";
 
@@ -18,25 +18,22 @@ export function CameraPanel({ status, cameraDeviceId, width = 1280, height = 720
   const [permission, setPermission] = useState<"idle" | "granted" | "denied">("idle");
   const [streamMode, setStreamMode] = useState<string>("pending");
   const [lastUploadAt, setLastUploadAt] = useState<number | null>(null);
-  const constraints = useMemo(
-    () => ({
-      audio: false,
-      video: {
-        deviceId: cameraDeviceId && cameraDeviceId !== "default" ? { exact: cameraDeviceId } : undefined,
-        width: { ideal: width },
-        height: { ideal: height },
-        frameRate: { ideal: fps },
-      },
-    }),
-    [cameraDeviceId, width, height, fps],
-  );
 
   useEffect(() => {
     let stream: MediaStream | null = null;
     let timer = 0;
     async function boot() {
       try {
-        stream = await navigator.mediaDevices.getUserMedia(constraints);
+        const browserDeviceId = await resolveBrowserCameraDeviceId(cameraDeviceId);
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: {
+            deviceId: browserDeviceId ? { exact: browserDeviceId } : undefined,
+            width: { ideal: width },
+            height: { ideal: height },
+            frameRate: { ideal: fps },
+          },
+        });
         setPermission("granted");
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
@@ -86,7 +83,7 @@ export function CameraPanel({ status, cameraDeviceId, width = 1280, height = 720
       window.clearInterval(timer);
       stream?.getTracks().forEach((track) => track.stop());
     };
-  }, [constraints, fps, width, height, mirror]);
+  }, [cameraDeviceId, fps, width, height, mirror]);
 
   return (
     <section className="panel camera-panel">
@@ -123,6 +120,20 @@ export function CameraPanel({ status, cameraDeviceId, width = 1280, height = 720
       </div>
     </section>
   );
+}
+
+async function resolveBrowserCameraDeviceId(cameraDeviceId?: string): Promise<string | undefined> {
+  if (!cameraDeviceId || cameraDeviceId === "default" || !navigator.mediaDevices?.enumerateDevices) {
+    return undefined;
+  }
+  const devices = await navigator.mediaDevices.enumerateDevices();
+  const browserIds = new Set(
+    devices
+      .filter((device) => device.kind === "videoinput")
+      .map((device) => device.deviceId)
+      .filter(Boolean),
+  );
+  return browserIds.has(cameraDeviceId) ? cameraDeviceId : undefined;
 }
 
 function SkeletonOverlay({ points }: { points: Record<string, [number, number] | null> }) {

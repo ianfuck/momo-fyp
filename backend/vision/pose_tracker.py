@@ -42,19 +42,9 @@ class PoseTracker:
             self._model = YOLO(self.model_path)
         return self._model
 
-    def _predict(self, frame: np.ndarray):
-        model = self._ensure_model()
-        try:
-            return model.predict(frame, conf=self.conf, verbose=False, device=self.device)
-        except Exception:
-            if self.device == "cpu":
-                raise
-            self.device = "cpu"
-            return model.predict(frame, conf=self.conf, verbose=False, device=self.device)
-
     def warmup(self) -> str:
         frame = np.zeros((64, 64, 3), dtype=np.uint8)
-        self._predict(frame)
+        self._ensure_model().predict(frame, conf=self.conf, verbose=False, device=self.device)
         return backend_label_for_device(self.device)
 
     def detect(self, frame: np.ndarray, person_bbox: list[int]) -> PoseSignals:
@@ -62,7 +52,7 @@ class PoseTracker:
         roi = frame[max(0, y1):max(y1 + 1, y2), max(0, x1):max(x1 + 1, x2)]
         if roi.size == 0:
             return PoseSignals()
-        results = self._predict(roi)
+        results = self._ensure_model().predict(roi, conf=self.conf, verbose=False, device=self.device)
         if not results:
             return PoseSignals()
         result = results[0]

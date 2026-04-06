@@ -33,31 +33,14 @@ class PersonDetector:
             self.loaded = True
         return self._model
 
-    def _track(self, frame: np.ndarray):
-        model = self._ensure_model()
-        try:
-            return model.track(frame, persist=True, classes=[0], conf=self.conf, verbose=False, device=self.device)
-        except Exception:
-            if self.device == "cpu":
-                raise
-            self.device = "cpu"
-            return model.track(frame, persist=True, classes=[0], conf=self.conf, verbose=False, device=self.device)
-
     def warmup(self) -> str:
         frame = np.zeros((64, 64, 3), dtype=np.uint8)
-        model = self._ensure_model()
-        try:
-            model.predict(frame, conf=self.conf, verbose=False, device=self.device)
-        except Exception:
-            if self.device != "cpu":
-                self.device = "cpu"
-                model.predict(frame, conf=self.conf, verbose=False, device=self.device)
-            else:
-                raise
+        self._ensure_model().predict(frame, conf=self.conf, verbose=False, device=self.device)
         return backend_label_for_device(self.device)
 
     def detect(self, frame: np.ndarray) -> list[PersonDetection]:
-        results = self._track(frame)
+        model = self._ensure_model()
+        results = model.track(frame, persist=True, classes=[0], conf=self.conf, verbose=False, device=self.device)
         detections: list[PersonDetection] = []
         if not results:
             return detections
