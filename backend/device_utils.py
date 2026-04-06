@@ -15,7 +15,7 @@ def _configure_windows_cuda_memory_fraction(torch) -> None:
     if not torch.cuda.is_available():
         return
     try:
-        torch.cuda.set_per_process_memory_fraction(0.99, 0)
+        torch.cuda.set_per_process_memory_fraction(0.999, 0)
     except Exception:
         return
     _WINDOWS_CUDA_MEMORY_CONFIGURED = True
