@@ -12,6 +12,11 @@ class OllamaClient:
         self.base_url = base_url.rstrip("/")
         self.timeout_sec = timeout_sec
 
+    def _ollama_options(self, options: dict | None = None) -> dict:
+        merged = dict(options or {})
+        merged.setdefault("num_gpu", 999)
+        return merged
+
     async def list_models(self) -> list[str]:
         async with httpx.AsyncClient(timeout=self.timeout_sec) as client:
             response = await client.get(f"{self.base_url}/api/tags")
@@ -31,7 +36,7 @@ class OllamaClient:
             "model": model,
             "prompt": "ping",
             "stream": False,
-            "options": {"num_predict": 1, "temperature": 0},
+            "options": self._ollama_options({"num_predict": 1, "temperature": 0}),
         }
         async with httpx.AsyncClient(timeout=self.timeout_sec) as client:
             response = await client.post(f"{self.base_url}/api/generate", json=payload)
@@ -52,7 +57,7 @@ class OllamaClient:
             "system": system,
             "prompt": prompt,
             "stream": True,
-            "options": options or {},
+            "options": self._ollama_options(options),
             "think": think,
         }
         if images:

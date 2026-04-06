@@ -13,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from backend.audio.player import AudioPlayer
 from backend.config import build_field_catalog, merge_config, validate_runtime_config
-from backend.device_utils import expected_accelerator_label, expected_vision_backend_label
+from backend.device_utils import expected_accelerator_label, expected_tts_backend_label, expected_vision_backend_label
 from backend.llm.ollama_client import OllamaClient
 from backend.model_manager import ensure_runtime_models
 from backend.prompting.prompt_builder import PromptBuilder, validate_generated_sentence
@@ -79,6 +79,7 @@ class Brain:
 
     async def _collect_startup_diagnostics(self) -> list[str]:
         expected = expected_accelerator_label()
+        tts_expected = expected_tts_backend_label()
         vision_expected = expected_vision_backend_label()
         lines = [f"[startup] expected_accelerator={expected}", f"[startup] expected_vision_backend={vision_expected}"]
         try:
@@ -91,7 +92,7 @@ class Brain:
             lines.append(f"[startup] yolo error={exc}")
 
         lines.append(
-            f"[startup] tts backend={self.tts.device_backend} target={expected} loaded={self.tts.loaded} ok={self.tts.device_backend == expected}"
+            f"[startup] tts backend={self.tts.device_backend} target={tts_expected} loaded={self.tts.loaded} ok={self.tts.device_backend == tts_expected}"
         )
 
         try:

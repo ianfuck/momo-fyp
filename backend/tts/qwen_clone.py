@@ -12,7 +12,7 @@ import librosa
 import numpy as np
 import soundfile as sf
 
-from backend.device_utils import backend_label_for_device, get_torch_device
+from backend.device_utils import backend_label_for_device, get_tts_device
 
 
 class QwenCloneTTS:
@@ -27,7 +27,7 @@ class QwenCloneTTS:
         self.available = Path(model_path).exists() and Path(ref_audio_path).exists() and Path(ref_text_path).exists()
         self._prepared_ref_audio: str | None = None
         self._prepared_ref_text: str | None = None
-        self.device = get_torch_device()
+        self.device = get_tts_device()
         self.device_backend = backend_label_for_device(self.device)
 
     def preload(self) -> None:
