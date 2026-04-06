@@ -33,14 +33,20 @@ class PersonDetector:
             self.loaded = True
         return self._model
 
+    def _inference_kwargs(self) -> dict:
+        return {
+            "device": self.device,
+            "half": self.device.startswith("cuda"),
+        }
+
     def warmup(self) -> str:
         frame = np.zeros((64, 64, 3), dtype=np.uint8)
-        self._ensure_model().predict(frame, conf=self.conf, verbose=False, device=self.device)
+        self._ensure_model().predict(frame, conf=self.conf, verbose=False, **self._inference_kwargs())
         return backend_label_for_device(self.device)
 
     def detect(self, frame: np.ndarray) -> list[PersonDetection]:
         model = self._ensure_model()
-        results = model.track(frame, persist=True, classes=[0], conf=self.conf, verbose=False, device=self.device)
+        results = model.track(frame, persist=True, classes=[0], conf=self.conf, verbose=False, **self._inference_kwargs())
         detections: list[PersonDetection] = []
         if not results:
             return detections
