@@ -3,6 +3,23 @@ from __future__ import annotations
 import os
 import platform
 
+_WINDOWS_CUDA_MEMORY_CONFIGURED = False
+
+
+def _configure_windows_cuda_memory_fraction(torch) -> None:
+    global _WINDOWS_CUDA_MEMORY_CONFIGURED
+    if _WINDOWS_CUDA_MEMORY_CONFIGURED:
+        return
+    if platform.system() != "Windows":
+        return
+    if not torch.cuda.is_available():
+        return
+    try:
+        torch.cuda.set_per_process_memory_fraction(0.95, 0)
+    except Exception:
+        return
+    _WINDOWS_CUDA_MEMORY_CONFIGURED = True
+
 
 def get_torch_device() -> str:
     try:
@@ -17,6 +34,7 @@ def get_torch_device() -> str:
         return "cpu"
 
     if torch.cuda.is_available():
+        _configure_windows_cuda_memory_fraction(torch)
         return "cuda:0"
     return "cpu"
 
