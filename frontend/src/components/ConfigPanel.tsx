@@ -224,6 +224,22 @@ export function ConfigPanel({ fields, config, cameras, audioDevices, models, onS
                 </label>
               );
             }
+            if (field.enum && field.enum.length > 0) {
+              return (
+                <label key={field.key} className="field">
+                  <span>{field.label}</span>
+                  <select value={String(value)} onChange={(e) => updateDraft(setDraft, setHasLocalEdits, draft, field.key, e.target.value)}>
+                    {field.enum.map((item) => (
+                      <option key={item} value={item}>
+                        {item}
+                      </option>
+                    ))}
+                  </select>
+                  <FieldMeta appliedValue={appliedValue} pendingValue={value} isDirty={isDirty} />
+                  <small>{field.description} Default: {String(field.default)}</small>
+                </label>
+              );
+            }
             if (field.type === "string[]") {
               return (
                 <label key={field.key} className="field">

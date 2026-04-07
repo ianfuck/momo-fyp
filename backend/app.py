@@ -93,6 +93,7 @@ class Brain:
             self.config.tts_ref_audio_path,
             self.config.tts_ref_text_path,
             clone_voice_enabled=self.config.tts_clone_voice_enabled,
+            device_mode=self.config.tts_device_mode,
         )
         self.serial = ESP32Link(self.config.serial_port, self.config.serial_baud_rate)
         self.vision = VisionRuntime(self.config)
@@ -129,6 +130,7 @@ class Brain:
             self.config.tts_ref_audio_path,
             self.config.tts_ref_text_path,
             clone_voice_enabled=self.config.tts_clone_voice_enabled,
+            device_mode=self.config.tts_device_mode,
         )
         try:
             self.tts.preload()
@@ -142,8 +144,8 @@ class Brain:
 
     async def _collect_startup_diagnostics(self) -> list[str]:
         expected = expected_accelerator_label()
-        tts_expected = expected_tts_backend_label()
-        vision_expected = expected_vision_backend_label()
+        tts_expected = expected_tts_backend_label(self.config.tts_device_mode)
+        vision_expected = expected_vision_backend_label(self.config.yolo_device_mode)
         lines = [f"[startup] expected_accelerator={expected}", f"[startup] expected_vision_backend={vision_expected}"]
         try:
             person_backend = await asyncio.to_thread(self.vision.detector.warmup)
@@ -159,7 +161,7 @@ class Brain:
         )
 
         try:
-            ollama = OllamaClient(self.config.ollama_base_url, min(self.config.ollama_timeout_sec, 30))
+            ollama = OllamaClient(self.config.ollama_base_url, min(self.config.ollama_timeout_sec, 30), self.config.ollama_device_mode)
             models = await ollama.list_models()
             if self.config.ollama_model not in models:
                 lines.append(f"[startup] ollama model={self.config.ollama_model} available=false")
@@ -174,13 +176,22 @@ class Brain:
                 None,
             )
             size_vram = int(current.get("size_vram", 0)) if current else 0
+            target = self._expected_ollama_backend_label(expected)
             backend = expected if size_vram > 0 else "cpu"
             lines.append(
-                f"[startup] ollama backend={backend} target={expected} size_vram={size_vram} ok={backend == expected}"
+                f"[startup] ollama backend={backend} target={target} size_vram={size_vram} ok={target == 'auto' or backend == target}"
             )
         except Exception as exc:
             lines.append(f"[startup] ollama error={exc}")
         return lines
+
+    def _expected_ollama_backend_label(self, accelerator: str) -> str:
+        mode = (self.config.ollama_device_mode or "auto").strip().lower()
+        if mode == "cpu":
+            return "cpu"
+        if mode == "auto":
+            return "auto"
+        return accelerator
 
     def snapshot(self):
         vision = self.vision.get_snapshot()
@@ -371,7 +382,7 @@ class Brain:
         required_terms: list[str] | None = None,
         images: list[bytes] | None = None,
     ) -> str:
-        client = OllamaClient(self.config.ollama_base_url, self.config.ollama_timeout_sec)
+        client = OllamaClient(self.config.ollama_base_url, self.config.ollama_timeout_sec, self.config.ollama_device_mode)
         started = time.monotonic()
         text = await self._generate_validated_text(client, system, prompt, limit, required_terms or [], images=images)
         self.state.llm_latency_ms = int((time.monotonic() - started) * 1000)
@@ -564,7 +575,7 @@ class Brain:
         self.state.last_spoken_text = text
 
     async def _classify_tts_emotion(self, text: str) -> tuple[str, str]:
-        client = OllamaClient(self.config.ollama_base_url, min(self.config.ollama_timeout_sec, 15))
+        client = OllamaClient(self.config.ollama_base_url, min(self.config.ollama_timeout_sec, 15), self.config.ollama_device_mode)
         prompt = (
             "你是 TTS 情緒標記分類器。"
             "以下是 Fish Audio S1 支援的情緒標記。"
@@ -681,22 +692,22 @@ async def build_apply_checks(payload: dict, config: RuntimeConfig) -> list[dict[
         except Exception as exc:
             checks.append({"component": "prompting", "status": "error", "message": f"Prompt reload failed: {exc}"})
 
-    if changed & {"yolo_model_path", "yolo_pose_model_path"}:
-        checks.append({"component": "vision-model", "status": "ok", "message": "YOLO model paths updated and verified."})
+    if changed & {"yolo_model_path", "yolo_pose_model_path", "yolo_device_mode"}:
+        checks.append({"component": "vision-model", "status": "ok", "message": f"YOLO model paths updated and verified. Device mode is {config.yolo_device_mode}."})
 
-    if changed & {"ollama_base_url", "ollama_model", "ollama_timeout_sec", "llm_use_person_crop"}:
-        client = OllamaClient(config.ollama_base_url, min(config.ollama_timeout_sec, 15))
+    if changed & {"ollama_base_url", "ollama_model", "ollama_device_mode", "ollama_timeout_sec", "llm_use_person_crop"}:
+        client = OllamaClient(config.ollama_base_url, min(config.ollama_timeout_sec, 15), config.ollama_device_mode)
         try:
             models = await client.list_models()
             if config.ollama_model in models:
                 mode = "person-crop image mode" if config.llm_use_person_crop else "prompt-only mode"
-                checks.append({"component": "llm", "status": "ok", "message": f"Ollama reachable and model {config.ollama_model} is available. LLM is in {mode}."})
+                checks.append({"component": "llm", "status": "ok", "message": f"Ollama reachable and model {config.ollama_model} is available. LLM is in {mode}. Device mode is {config.ollama_device_mode}."})
             else:
                 checks.append({"component": "llm", "status": "error", "message": f"Ollama reachable but model {config.ollama_model} was not found."})
         except Exception as exc:
             checks.append({"component": "llm", "status": "error", "message": f"Ollama check failed: {exc}"})
 
-    if changed & {"tts_model_path", "tts_emotion_enabled", "tts_clone_voice_enabled", "tts_ref_audio_path", "tts_ref_text_path", "tts_timeout_sec"}:
+    if changed & {"tts_model_path", "tts_device_mode", "tts_emotion_enabled", "tts_clone_voice_enabled", "tts_ref_audio_path", "tts_ref_text_path", "tts_timeout_sec"}:
         errors: list[str] = []
         model_path = brain.tts.model_path if hasattr(brain.tts.model_path, "exists") else Path(brain.tts.model_path)
         ref_audio_path = brain.tts.ref_audio_path if hasattr(brain.tts.ref_audio_path, "exists") else Path(brain.tts.ref_audio_path)
@@ -713,7 +724,7 @@ async def build_apply_checks(payload: dict, config: RuntimeConfig) -> list[dict[
         else:
             mode = "clone voice" if config.tts_clone_voice_enabled else "normal TTS"
             emotion_mode = "emotion on" if config.tts_emotion_enabled else "emotion off"
-            checks.append({"component": "tts", "status": "ok", "message": f"TTS ready in {mode}, {emotion_mode}. Timeout set to {config.tts_timeout_sec * 1000} ms."})
+            checks.append({"component": "tts", "status": "ok", "message": f"TTS ready in {mode}, {emotion_mode}, device {config.tts_device_mode}. Timeout set to {config.tts_timeout_sec * 1000} ms."})
 
     if changed & {"audio_output_device", "tts_output_volume"}:
         available_ids = {item["id"] for item in AudioPlayer.list_output_devices()}
@@ -841,6 +852,7 @@ async def update_config(payload: dict):
         brain.config.tts_ref_audio_path,
         brain.config.tts_ref_text_path,
         clone_voice_enabled=brain.config.tts_clone_voice_enabled,
+        device_mode=brain.config.tts_device_mode,
     )
     brain.vision.reconfigure(brain.config)
     apply_checks = await build_apply_checks(payload, brain.config)
@@ -891,7 +903,7 @@ async def get_audio_devices():
 
 @app.get("/api/ollama/models")
 async def get_ollama_models():
-    client = OllamaClient(brain.config.ollama_base_url, brain.config.ollama_timeout_sec)
+    client = OllamaClient(brain.config.ollama_base_url, brain.config.ollama_timeout_sec, brain.config.ollama_device_mode)
     try:
         models = await client.list_models()
     except Exception:

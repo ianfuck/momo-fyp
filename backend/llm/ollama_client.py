@@ -8,13 +8,17 @@ import httpx
 
 
 class OllamaClient:
-    def __init__(self, base_url: str, timeout_sec: int) -> None:
+    def __init__(self, base_url: str, timeout_sec: int, device_mode: str = "auto") -> None:
         self.base_url = base_url.rstrip("/")
         self.timeout_sec = timeout_sec
+        self.device_mode = (device_mode or "auto").strip().lower()
 
     def _ollama_options(self, options: dict | None = None) -> dict:
         merged = dict(options or {})
-        merged.setdefault("num_gpu", 999)
+        if self.device_mode == "cpu":
+            merged["num_gpu"] = 0
+        elif self.device_mode in {"gpu", "mps"}:
+            merged.setdefault("num_gpu", 999)
         return merged
 
     async def list_models(self) -> list[str]:

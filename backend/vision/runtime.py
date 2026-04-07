@@ -30,9 +30,9 @@ class VisionState:
 class VisionRuntime:
     def __init__(self, config: RuntimeConfig) -> None:
         self.config = config
-        self.detector = PersonDetector(config.yolo_model_path)
+        self.detector = PersonDetector(config.yolo_model_path, device_mode=config.yolo_device_mode)
         self.eyes = FaceEyeTracker()
-        self.pose = PoseTracker(config.yolo_pose_model_path)
+        self.pose = PoseTracker(config.yolo_pose_model_path, device_mode=config.yolo_device_mode)
         self.motion = MotionTracker()
         self.top_color_history: deque[str] = deque(maxlen=6)
         self.bottom_color_history: deque[str] = deque(maxlen=6)
@@ -69,8 +69,8 @@ class VisionRuntime:
 
     def reconfigure(self, config: RuntimeConfig) -> None:
         self.config = config
-        self.detector = PersonDetector(config.yolo_model_path)
-        self.pose = PoseTracker(config.yolo_pose_model_path)
+        self.detector = PersonDetector(config.yolo_model_path, device_mode=config.yolo_device_mode)
+        self.pose = PoseTracker(config.yolo_pose_model_path, device_mode=config.yolo_device_mode)
         self.failed_open_count = 0
         self.camera_disabled = False
         self.top_color_history.clear()

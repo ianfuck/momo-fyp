@@ -31,10 +31,10 @@ class PoseSignals:
 
 
 class PoseTracker:
-    def __init__(self, model_path: str, conf: float = 0.25) -> None:
+    def __init__(self, model_path: str, conf: float = 0.25, device_mode: str = "auto") -> None:
         self.model_path = model_path
         self.conf = conf
-        self.device = get_vision_device()
+        self.device = get_vision_device(device_mode)
         self._model: YOLO | None = None
 
     def _ensure_model(self) -> YOLO:

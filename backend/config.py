@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import platform
 from pathlib import Path
 
 from pydantic import ValidationError
@@ -23,6 +24,7 @@ FIELD_DESCRIPTIONS: dict[str, tuple[str, str, str | None]] = {
     "camera_mirror_preview": ("Mirror Preview", "Mirror the preview output in UI.", None),
     "yolo_model_path": ("YOLO Model Path", "YOLO person detection model path.", None),
     "yolo_pose_model_path": ("YOLO Pose Model Path", "YOLO pose model path.", None),
+    "yolo_device_mode": ("YOLO Device", "Device mode for person detect and pose: auto, cpu, or accelerator for this OS.", None),
     "lock_bbox_threshold_ratio": ("Lock Threshold", "Person bbox area ratio required to enter lock mode.", "0.01-0.95"),
     "unlock_bbox_threshold_ratio": ("Unlock Threshold", "Person bbox area ratio required to remain locked.", "0.01-0.95"),
     "enter_debounce_ms": ("Enter Debounce", "Continuous time above threshold before locking.", ">=0"),
@@ -38,6 +40,7 @@ FIELD_DESCRIPTIONS: dict[str, tuple[str, str, str | None]] = {
     "crouch_delta_threshold": ("Crouch Delta", "Relative vertical change threshold for crouch detection.", "0-1"),
     "ollama_base_url": ("Ollama URL", "Base URL for Ollama HTTP API.", None),
     "ollama_model": ("Ollama Model", "Model name sent to Ollama generate API.", None),
+    "ollama_device_mode": ("Ollama Device", "Preferred Ollama execution mode: auto, cpu, or accelerator for this OS.", None),
     "llm_use_person_crop": ("LLM Person Crop Mode", "Send person crop image to LLM and switch tracking prompt to image-guided audience observation.", None),
     "ollama_timeout_sec": ("Ollama Timeout", "Maximum streaming generation timeout in seconds.", "1-3600"),
     "ollama_max_retries": ("Ollama Retries", "Retry count after timeout or stream failure.", "0-10"),
@@ -45,6 +48,7 @@ FIELD_DESCRIPTIONS: dict[str, tuple[str, str, str | None]] = {
     "idle_examples_selected": ("Idle Examples", "CSV examples used for idle prompt generation.", None),
     "history_max_sentences": ("History Size", "History rollover limit. Fixed at 10 for MVP.", "10"),
     "tts_model_path": ("TTS Model Path", "Local Fish Audio S1 Mini model path.", None),
+    "tts_device_mode": ("TTS Device", "Device mode for Fish TTS: auto, cpu, or accelerator for this OS.", None),
     "tts_emotion_enabled": ("TTS Emotion", "Let Ollama choose and apply an emotion tag for Fish TTS.", None),
     "tts_clone_voice_enabled": ("Clone Voice", "Use reference audio/text for Fish voice cloning. Turn off for normal TTS.", None),
     "tts_ref_audio_path": ("TTS Ref Audio", "Reference audio used for voice clone prompt.", None),
@@ -80,6 +84,7 @@ FIELD_GROUPS: dict[str, str] = {
     "camera_mirror_preview": "camera",
     "yolo_model_path": "vision",
     "yolo_pose_model_path": "vision",
+    "yolo_device_mode": "vision",
     "lock_bbox_threshold_ratio": "vision",
     "unlock_bbox_threshold_ratio": "vision",
     "enter_debounce_ms": "vision",
@@ -95,6 +100,7 @@ FIELD_GROUPS: dict[str, str] = {
     "crouch_delta_threshold": "vision",
     "ollama_base_url": "llm",
     "ollama_model": "llm",
+    "ollama_device_mode": "llm",
     "llm_use_person_crop": "llm",
     "ollama_timeout_sec": "llm",
     "ollama_max_retries": "llm",
@@ -102,6 +108,7 @@ FIELD_GROUPS: dict[str, str] = {
     "idle_examples_selected": "prompting",
     "history_max_sentences": "prompting",
     "tts_model_path": "tts",
+    "tts_device_mode": "tts",
     "tts_emotion_enabled": "tts",
     "tts_clone_voice_enabled": "tts",
     "tts_ref_audio_path": "tts",
@@ -151,7 +158,7 @@ def build_field_catalog(config: RuntimeConfig) -> list[ConfigField]:
                 default=default,
                 value=value,
                 valid_range=valid_range,
-                enum=["browser", "backend"] if key == "camera_source" else None,
+                enum=_enum_for_field(key),
                 applies_to=FIELD_GROUPS.get(key, "general"),
             )
         )
@@ -168,6 +175,15 @@ def _infer_type(value: object) -> str:
     if isinstance(value, list):
         return "string[]"
     return "string"
+
+
+def _enum_for_field(key: str) -> list[str] | None:
+    if key == "camera_source":
+        return ["browser", "backend"]
+    if key in {"yolo_device_mode", "tts_device_mode", "ollama_device_mode"}:
+        accelerator = "mps" if platform.system() == "Darwin" else "gpu"
+        return ["auto", "cpu", accelerator]
+    return None
 
 
 def validate_runtime_config(candidate: RuntimeConfig) -> list[str]:
@@ -191,6 +207,14 @@ def validate_runtime_config(candidate: RuntimeConfig) -> list[str]:
         errors.append("ollama_timeout_sec must be >= 1")
     if candidate.tts_timeout_sec < 1:
         errors.append("tts_timeout_sec must be >= 1")
+    accelerator = "mps" if platform.system() == "Darwin" else "gpu"
+    allowed_device_modes = {"auto", "cpu", accelerator}
+    if candidate.yolo_device_mode not in allowed_device_modes:
+        errors.append(f"yolo_device_mode must be one of {sorted(allowed_device_modes)}")
+    if candidate.tts_device_mode not in allowed_device_modes:
+        errors.append(f"tts_device_mode must be one of {sorted(allowed_device_modes)}")
+    if candidate.ollama_device_mode not in allowed_device_modes:
+        errors.append(f"ollama_device_mode must be one of {sorted(allowed_device_modes)}")
     if candidate.history_max_sentences != 10:
         errors.append("history_max_sentences must be fixed at 10 for MVP")
     for path in candidate.tracking_examples_selected + candidate.idle_examples_selected:

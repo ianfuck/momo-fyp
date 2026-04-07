@@ -134,6 +134,7 @@ class RuntimeConfig(BaseModel):
     camera_mirror_preview: bool = False
     yolo_model_path: str = "model/yolo/yolo26n.pt"
     yolo_pose_model_path: str = "model/yolo/yolo26n-pose.pt"
+    yolo_device_mode: str = "auto"
     lock_bbox_threshold_ratio: float = 0.12
     unlock_bbox_threshold_ratio: float | None = None
     enter_debounce_ms: int = 1000
@@ -149,6 +150,7 @@ class RuntimeConfig(BaseModel):
     crouch_delta_threshold: float = 0.18
     ollama_base_url: str = "http://127.0.0.1:11434"
     ollama_model: str = "qwen3.5:2b"
+    ollama_device_mode: str = "auto"
     llm_use_person_crop: bool = True
     ollama_timeout_sec: int = 600
     ollama_max_retries: int = 1
@@ -164,6 +166,7 @@ class RuntimeConfig(BaseModel):
     )
     history_max_sentences: int = 10
     tts_model_path: str = "model/huggingface/hf_snapshots/fishaudio__s1-mini"
+    tts_device_mode: str = "auto"
     tts_emotion_enabled: bool = True
     tts_clone_voice_enabled: bool = True
     tts_ref_audio_path: str = "resource/voice/ref-voice3.wav"

@@ -70,7 +70,14 @@ def _load_fish_decoder_model(config_name: str, checkpoint_path: str, device: str
 
 
 class FishCloneTTS:
-    def __init__(self, model_path: str, ref_audio_path: str, ref_text_path: str, clone_voice_enabled: bool = True) -> None:
+    def __init__(
+        self,
+        model_path: str,
+        ref_audio_path: str,
+        ref_text_path: str,
+        clone_voice_enabled: bool = True,
+        device_mode: str = "auto",
+    ) -> None:
         self.model_path = model_path
         self.ref_audio_path = ref_audio_path
         self.ref_text_path = ref_text_path
@@ -82,7 +89,7 @@ class FishCloneTTS:
         self.available = Path(model_path).exists() and (
             not clone_voice_enabled or (Path(ref_audio_path).exists() and Path(ref_text_path).exists())
         )
-        self.device = get_tts_device()
+        self.device = get_tts_device(device_mode)
         self.device_backend = backend_label_for_device(self.device)
 
     def preload(self) -> None:
