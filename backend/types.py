@@ -74,6 +74,24 @@ class ServoTelemetry(BaseModel):
     tracking_source: str = "none"
 
 
+class SerialMonitorEntry(BaseModel):
+    ts: str = Field(default_factory=utc_now_iso)
+    direction: str
+    message: str
+
+
+class SerialMonitorSnapshot(BaseModel):
+    port: str | None = None
+    baud_rate: int | None = None
+    last_tx: str | None = None
+    last_tx_at: str | None = None
+    last_rx: str | None = None
+    last_rx_at: str | None = None
+    last_error: str | None = None
+    last_error_at: str | None = None
+    entries: list[SerialMonitorEntry] = Field(default_factory=list)
+
+
 class SystemStats(BaseModel):
     memory_rss_mb: float = 0.0
     memory_vms_mb: float = 0.0
@@ -101,6 +119,7 @@ class StatusSnapshot(BaseModel):
     active_sentence_index: int = 0
     audience: AudienceFeatures = Field(default_factory=AudienceFeatures)
     servo: ServoTelemetry = Field(default_factory=ServoTelemetry)
+    serial_monitor: SerialMonitorSnapshot = Field(default_factory=SerialMonitorSnapshot)
     stats: SystemStats = Field(default_factory=SystemStats)
     camera_device_id: str | None = None
     camera_mode: str | None = None
@@ -197,8 +216,10 @@ class RuntimeConfig(BaseModel):
     tts_retry_count: int = 1
     serial_port: str = "auto"
     serial_baud_rate: int = 115200
-    servo_left_zero_deg: float = 90.0
-    servo_right_zero_deg: float = 90.0
+    servo_left_zero_deg: float = 85.0
+    servo_right_zero_deg: float = 93.0
+    servo_output_inverted: bool = False
+    servo_eye_spacing_cm: int = 10
     servo_left_min_deg: float = 45.0
     servo_left_max_deg: float = 135.0
     servo_right_min_deg: float = 45.0

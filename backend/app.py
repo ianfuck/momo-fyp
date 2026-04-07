@@ -119,6 +119,7 @@ class Brain:
             with contextlib.suppress(asyncio.CancelledError):
                 await task
         self.vision.stop()
+        self.serial.close()
 
     def _prepare_runtime_models(self) -> None:
         ensure_runtime_models(self.config)
@@ -368,6 +369,7 @@ class Brain:
         )
 
     async def refresh_runtime_status(self) -> None:
+        self.serial.refresh_connection()
         await self._refresh_ollama_runtime_stats()
 
     async def _refresh_ollama_runtime_stats(self) -> None:
@@ -414,6 +416,7 @@ class Brain:
         snap = self.state.snapshot()
         snap.stats = get_system_stats("tmp")
         snap.serial_connected = self.serial.connected
+        snap.serial_monitor = self.serial.snapshot()
         snap.tts_loaded = self.tts.loaded
         snap.camera_device_id = self.config.camera_device_id
         snap.camera_mode = f"{self.config.camera_width}x{self.config.camera_height}@{self.config.camera_fps}"
@@ -424,6 +427,18 @@ class Brain:
         snap.tts_runtime = self.tts_runtime
         snap.ollama_runtime = self.ollama_runtime
         return snap
+
+    def send_servo_for_features(self, features, tracking_source: str) -> None:
+        servo = self._compute_servo_from_features(features, tracking_source)
+        self.state.servo = servo
+        if features.track_id is None:
+            return
+        self.serial.send_servo_command(
+            servo.left_deg,
+            servo.right_deg,
+            mode="track",
+            tracking_source=servo.tracking_source,
+        )
 
     async def housekeeping_loop(self) -> None:
         while True:
@@ -444,7 +459,7 @@ class Brain:
                 self.state.set_pipeline_stage(PipelineStage.ERROR, error=str(exc))
                 self.state.event_log = [f"vision loop error: {exc}", *self.state.event_log][:20]
                 self.last_sentence_finished_at = time.monotonic()
-            await asyncio.sleep(0.2)
+            await asyncio.sleep(max(0.02, 1.0 / max(1, self.config.camera_fps)))
 
     def _recover_if_pipeline_stuck(self) -> None:
         stage = self.state.pipeline.stage
@@ -472,14 +487,7 @@ class Brain:
         vision = self.vision.get_snapshot()
         features = vision.features
         self.state.audience = features
-        self.state.servo = self._compute_servo_from_features(features, vision.servo.tracking_source)
-        if self.serial.connected and features.track_id is not None:
-            self.serial.send_servo_command(
-                self.state.servo.left_deg,
-                self.state.servo.right_deg,
-                mode="track",
-                tracking_source=self.state.servo.tracking_source,
-            )
+        self.send_servo_for_features(features, vision.servo.tracking_source)
 
         if now < self.cooldown_until:
             self.state.set_mode(SystemMode.PURGE_COOLDOWN)
@@ -517,9 +525,25 @@ class Brain:
             bbox_area_ratio=features.bbox_area_ratio,
             left_zero_deg=self.config.servo_left_zero_deg,
             right_zero_deg=self.config.servo_right_zero_deg,
+            eye_spacing_cm=self.config.servo_eye_spacing_cm,
             left_limits=(self.config.servo_left_min_deg, self.config.servo_left_max_deg),
             right_limits=(self.config.servo_right_min_deg, self.config.servo_right_max_deg),
         )
+        if self.config.servo_output_inverted:
+            servo.left_deg = round(
+                min(
+                    max((2 * self.config.servo_left_zero_deg) - servo.left_deg, self.config.servo_left_min_deg),
+                    self.config.servo_left_max_deg,
+                ),
+                2,
+            )
+            servo.right_deg = round(
+                min(
+                    max((2 * self.config.servo_right_zero_deg) - servo.right_deg, self.config.servo_right_min_deg),
+                    self.config.servo_right_max_deg,
+                ),
+                2,
+            )
         servo.tracking_source = tracking_source
         return servo
 
@@ -1146,6 +1170,8 @@ async def build_apply_checks(payload: dict, config: RuntimeConfig) -> list[dict[
     if changed & {
         "servo_left_zero_deg",
         "servo_right_zero_deg",
+        "servo_output_inverted",
+        "servo_eye_spacing_cm",
         "servo_left_min_deg",
         "servo_left_max_deg",
         "servo_right_min_deg",
@@ -1260,6 +1286,8 @@ async def update_config(payload: dict):
     changed = [key for key, value in payload.items() if getattr(brain.config, key) != value]
     changed_keys = set(changed)
     brain.config = merged
+    previous_serial = brain.serial
+    previous_serial.close()
     brain.serial = ESP32Link(brain.config.serial_port, brain.config.serial_baud_rate)
     if changed_keys & {
         "tts_model_path",
@@ -1311,6 +1339,8 @@ async def post_camera_frame(request: Request):
     if not body:
         raise HTTPException(status_code=400, detail="empty frame")
     state = brain.vision.submit_jpeg_frame(body)
+    if brain.config.camera_source == "browser":
+        brain.send_servo_for_features(state.features, state.servo.tracking_source)
     return {
         "track_id": state.features.track_id,
         "eye_confidence": state.features.eye_confidence,

@@ -56,6 +56,21 @@ export type StatusSnapshot = {
     right_deg: number;
     tracking_source: string;
   };
+  serial_monitor: {
+    port?: string | null;
+    baud_rate?: number | null;
+    last_tx?: string | null;
+    last_tx_at?: string | null;
+    last_rx?: string | null;
+    last_rx_at?: string | null;
+    last_error?: string | null;
+    last_error_at?: string | null;
+    entries: Array<{
+      ts: string;
+      direction: string;
+      message: string;
+    }>;
+  };
   stats: {
     memory_rss_mb: number;
     memory_vms_mb: number;

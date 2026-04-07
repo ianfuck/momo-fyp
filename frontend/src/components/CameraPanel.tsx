@@ -76,7 +76,7 @@ export function CameraPanel({ status, cameraDeviceId, width = 1280, height = 720
                 uploadInFlightRef.current = false;
               });
           }, "image/jpeg", 0.55);
-        }, Math.max(160, Math.round(1000 / Math.max(1, fps))));
+        }, Math.max(40, Math.round(1000 / Math.max(1, fps))));
       } catch {
         setPermission("denied");
       }

@@ -69,6 +69,8 @@ FIELD_DESCRIPTIONS: dict[str, tuple[str, str, str | None]] = {
     "serial_baud_rate": ("Baud Rate", "UART speed for ESP32 serial communication.", ">=1200"),
     "servo_left_zero_deg": ("Left Zero", "Neutral angle for the left eye servo.", "0-180"),
     "servo_right_zero_deg": ("Right Zero", "Neutral angle for the right eye servo.", "0-180"),
+    "servo_output_inverted": ("Invert Output", "Mirror left and right servo output around each servo zero angle.", None),
+    "servo_eye_spacing_cm": ("Eye Spacing", "Distance between the two servo eyes used by the aiming geometry.", ">=1"),
     "servo_left_min_deg": ("Left Min", "Left servo lower clamp.", "0-180"),
     "servo_left_max_deg": ("Left Max", "Left servo upper clamp.", "0-180"),
     "servo_right_min_deg": ("Right Min", "Right servo lower clamp.", "0-180"),
@@ -130,6 +132,8 @@ FIELD_GROUPS: dict[str, str] = {
     "serial_baud_rate": "serial",
     "servo_left_zero_deg": "servo",
     "servo_right_zero_deg": "servo",
+    "servo_output_inverted": "servo",
+    "servo_eye_spacing_cm": "servo",
     "servo_left_min_deg": "servo",
     "servo_left_max_deg": "servo",
     "servo_right_min_deg": "servo",
@@ -231,6 +235,8 @@ def validate_runtime_config(candidate: RuntimeConfig) -> list[str]:
         errors.append("tts_reference_mode must be one of ['fixed', 'ollama_emotion', 'random']")
     if candidate.history_max_sentences != 10:
         errors.append("history_max_sentences must be fixed at 10 for MVP")
+    if candidate.servo_eye_spacing_cm < 1:
+        errors.append("servo_eye_spacing_cm must be >= 1")
     for path in candidate.tracking_examples_selected + candidate.idle_examples_selected:
         if not Path(path).exists():
             errors.append(f"example file not found: {path}")

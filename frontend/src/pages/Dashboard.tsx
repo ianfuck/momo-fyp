@@ -6,6 +6,7 @@ import { EventLog } from "../components/EventLog";
 import { PipelineStage } from "../components/PipelineStage";
 import { PromptPanel } from "../components/PromptPanel";
 import { RuntimeOverview } from "../components/RuntimeOverview";
+import { SerialMonitor } from "../components/SerialMonitor";
 import { StatusTable } from "../components/StatusTable";
 import { SystemStats } from "../components/SystemStats";
 import { fetchAudioDevices, fetchCameras, fetchConfig, fetchOllamaModels, fetchStatus, simulatePipeline, updateConfig } from "../lib/api";
@@ -45,6 +46,7 @@ const initialStatus: StatusSnapshot = {
   },
   pipeline: { stage: "IDLE", elapsed_ms: 0, last_error: null },
   servo: { left_deg: 90, right_deg: 90, tracking_source: "none" },
+  serial_monitor: { entries: [] },
   stats: { memory_rss_mb: 0, memory_vms_mb: 0, temp_file_count: 0, temp_file_size_mb: 0 },
   yolo_person_runtime: {},
   yolo_pose_runtime: {},
@@ -109,16 +111,25 @@ export function Dashboard() {
       setAudioDevices(audioData);
       setModels(modelData);
     })();
-    const interval = window.setInterval(() => {
-      void Promise.all([fetchStatus(), fetchConfig()])
-        .then(([statusData, configData]) => {
+    const statusInterval = window.setInterval(() => {
+      void fetchStatus()
+        .then((statusData) => {
           setStatus(statusData);
+        })
+        .catch(() => undefined);
+    }, 200);
+    const configInterval = window.setInterval(() => {
+      void fetchConfig()
+        .then((configData) => {
           setConfig(configData.config);
           setFields(configData.fields);
         })
         .catch(() => undefined);
-    }, 1000);
-    return () => window.clearInterval(interval);
+    }, 1500);
+    return () => {
+      window.clearInterval(statusInterval);
+      window.clearInterval(configInterval);
+    };
   }, []);
 
   return (
@@ -145,6 +156,7 @@ export function Dashboard() {
         <RuntimeOverview status={status} config={config} applyChecks={updateState.applyChecks} />
         <PipelineStage active={status.pipeline.stage} elapsedMs={status.pipeline.elapsed_ms} />
         <StatusTable status={status} config={config} />
+        <SerialMonitor status={status} />
         <PromptPanel status={status} />
         <SystemStats status={status} />
         <EventLog items={status.event_log} />

@@ -462,6 +462,63 @@ body {
   overflow: auto;
 }
 
+.serial-overview {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.serial-payload {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.serial-payload code,
+.serial-entry code {
+  display: block;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.72);
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+
+.serial-log {
+  display: grid;
+  gap: 8px;
+  max-height: 280px;
+  overflow: auto;
+}
+
+.serial-entry {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.66);
+}
+
+.serial-entry.tx {
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--line) 65%);
+}
+
+.serial-entry.rx {
+  border-color: color-mix(in srgb, var(--ok) 35%, var(--line) 65%);
+}
+
+.serial-entry.error {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line) 45%);
+  background: rgba(175, 47, 24, 0.08);
+}
+
+.serial-entry.status {
+  border-color: color-mix(in srgb, #3d7ea6 35%, var(--line) 65%);
+}
+
 @media (max-width: 900px) {
   .config-panel {
     grid-column: span 1;
@@ -473,6 +530,10 @@ body {
   }
 
   .overview-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .serial-overview {
     grid-template-columns: 1fr;
   }
 }

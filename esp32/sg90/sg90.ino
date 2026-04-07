@@ -8,8 +8,8 @@ constexpr int LEFT_PIN = 18;
 constexpr int RIGHT_PIN = 19;
 constexpr int SERIAL_BAUD = 115200;
 
-float currentLeft = 90.0f;
-float currentRight = 90.0f;
+float currentLeft = 85.0f;
+float currentRight = 93.0f;
 unsigned long lastCommandAt = 0;
 
 void applyServo(float leftDeg, float rightDeg) {
@@ -57,7 +57,7 @@ void loop() {
   }
 
   if (millis() - lastCommandAt > 3000) {
-    applyServo(90.0f, 90.0f);
+    applyServo(85.0f, 93.0f);
   }
 }
 

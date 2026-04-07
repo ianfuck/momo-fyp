@@ -34,6 +34,7 @@ def test_status_endpoint_returns_pipeline_and_stats():
     payload = response.json()
     assert "pipeline" in payload
     assert "stats" in payload
+    assert "serial_monitor" in payload
     assert "tts_emotion_raw" in payload
     assert "tts_emotion_applied" in payload
     assert "tts_emotion_used" in payload
@@ -60,6 +61,88 @@ def test_simulate_pipeline_returns_prompt_and_snapshot():
     assert response.status_code == 200
     payload = response.json()
     assert payload["snapshot"]["pipeline"]["stage"] == "PLAYBACK"
+
+
+def test_browser_frame_upload_sends_servo_immediately():
+    original_submit = brain.vision.submit_jpeg_frame
+    original_serial = brain.serial
+    original_config = brain.config.model_copy(deep=True)
+
+    sent: list[tuple[float, float, str, str]] = []
+
+    class FakeSerial:
+        connected = False
+
+        def send_servo_command(self, left_deg: float, right_deg: float, mode: str = "track", tracking_source: str = "eye_midpoint"):
+            sent.append((left_deg, right_deg, mode, tracking_source))
+            return "ok"
+
+        def snapshot(self):
+            from backend.types import SerialMonitorSnapshot
+
+            return SerialMonitorSnapshot()
+
+        def close(self):
+            return None
+
+    brain.config = original_config.model_copy(update={"camera_source": "browser"})
+    brain.serial = FakeSerial()
+    brain.vision.submit_jpeg_frame = lambda _: VisionState(
+        features=AudienceFeatures(track_id=1, bbox_area_ratio=0.35, center_x_norm=0.5, eye_midpoint=[0.72, 0.5]),
+        servo=ServoTelemetry(tracking_source="eye_midpoint"),
+        frame_jpeg=None,
+        frame_shape=(640, 480),
+        target_seen_at=None,
+    )
+
+    try:
+        response = client.post("/api/camera/frame", content=b"jpeg-bytes", headers={"Content-Type": "image/jpeg"})
+        assert response.status_code == 200
+        assert sent
+        assert sent[0][2] == "track"
+        assert sent[0][3] == "eye_midpoint"
+    finally:
+        brain.vision.submit_jpeg_frame = original_submit
+        brain.serial = original_serial
+        brain.config = original_config
+
+
+def test_update_mode_attempts_send_even_when_serial_marked_disconnected():
+    original_snapshot = brain.vision.get_snapshot
+    original_serial = brain.serial
+
+    sent: list[tuple[float, float]] = []
+
+    class FakeSerial:
+        connected = False
+
+        def send_servo_command(self, left_deg: float, right_deg: float, mode: str = "track", tracking_source: str = "eye_midpoint"):
+            sent.append((left_deg, right_deg))
+            return "ok"
+
+        def snapshot(self):
+            from backend.types import SerialMonitorSnapshot
+
+            return SerialMonitorSnapshot()
+
+        def close(self):
+            return None
+
+    brain.serial = FakeSerial()
+    brain.vision.get_snapshot = lambda: VisionState(
+        features=AudienceFeatures(track_id=1, bbox_area_ratio=0.35, center_x_norm=0.5, eye_midpoint=[0.72, 0.5]),
+        servo=ServoTelemetry(tracking_source="eye_midpoint"),
+        frame_jpeg=None,
+        frame_shape=(640, 480),
+        target_seen_at=None,
+    )
+
+    try:
+        brain._update_mode_from_vision()
+        assert sent
+    finally:
+        brain.vision.get_snapshot = original_snapshot
+        brain.serial = original_serial
 
 
 def test_generate_tracking_line_uses_person_crop_mode_when_enabled():
@@ -193,6 +276,36 @@ def test_update_config_can_reapply_same_payload():
     payload = second.json()
     assert payload["validation_errors"] == []
     assert payload["apply_checks"]
+
+
+def test_update_config_accepts_servo_eye_spacing():
+    original_config = brain.config.model_copy(deep=True)
+    original_serial = brain.serial
+    try:
+        response = client.post("/api/config", json={"servo_eye_spacing_cm": 12})
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["validation_errors"] == []
+        assert payload["applied_config"]["servo_eye_spacing_cm"] == 12
+    finally:
+        brain.config = original_config
+        brain.serial.close()
+        brain.serial = original_serial
+
+
+def test_update_config_accepts_servo_output_inverted():
+    original_config = brain.config.model_copy(deep=True)
+    original_serial = brain.serial
+    try:
+        response = client.post("/api/config", json={"servo_output_inverted": True})
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["validation_errors"] == []
+        assert payload["applied_config"]["servo_output_inverted"] is True
+    finally:
+        brain.config = original_config
+        brain.serial.close()
+        brain.serial = original_serial
 
 
 def test_update_config_tts_path_no_server_error():
@@ -813,6 +926,82 @@ def test_snapshot_recomputes_servo_from_latest_vision(monkeypatch):
     finally:
         brain.vision.get_snapshot = original_snapshot
         brain.state.servo = original_state_servo
+
+
+def test_compute_servo_can_invert_output():
+    original_config = brain.config.model_copy(deep=True)
+    try:
+        features = AudienceFeatures(
+            track_id=1,
+            bbox_area_ratio=0.35,
+            center_x_norm=0.5,
+            eye_midpoint=[0.72, 0.5],
+        )
+        brain.config = original_config.model_copy(
+            update={
+                "servo_left_zero_deg": 90.0,
+                "servo_right_zero_deg": 90.0,
+                "servo_output_inverted": False,
+                "servo_left_min_deg": 45.0,
+                "servo_left_max_deg": 135.0,
+                "servo_right_min_deg": 45.0,
+                "servo_right_max_deg": 135.0,
+            }
+        )
+        normal = brain._compute_servo_from_features(features, "eye_midpoint")
+        brain.config = brain.config.model_copy(update={"servo_output_inverted": True})
+        inverted = brain._compute_servo_from_features(features, "eye_midpoint")
+
+        assert inverted.left_deg == round((2 * 90.0) - normal.left_deg, 2)
+        assert inverted.right_deg == round((2 * 90.0) - normal.right_deg, 2)
+    finally:
+        brain.config = original_config
+
+
+def test_snapshot_includes_serial_monitor(monkeypatch):
+    from backend.types import SerialMonitorEntry, SerialMonitorSnapshot
+
+    original_snapshot = brain.vision.get_snapshot
+    original_serial = brain.serial
+
+    class FakeSerial:
+        connected = True
+
+        def snapshot(self):
+            return SerialMonitorSnapshot(
+                port="/dev/cu.usbmodem-test",
+                baud_rate=115200,
+                last_tx="{\"type\":\"servo\"}",
+                last_tx_at="2026-04-07T10:00:00Z",
+                last_rx="{\"type\":\"ack\"}",
+                last_rx_at="2026-04-07T10:00:01Z",
+                entries=[
+                    SerialMonitorEntry(ts="2026-04-07T10:00:01Z", direction="rx", message="{\"type\":\"ack\"}"),
+                    SerialMonitorEntry(ts="2026-04-07T10:00:00Z", direction="tx", message="{\"type\":\"servo\"}"),
+                ],
+            )
+
+        def close(self):
+            return None
+
+    brain.vision.get_snapshot = lambda: VisionState(
+        features=AudienceFeatures(),
+        servo=ServoTelemetry(tracking_source="none"),
+        frame_jpeg=None,
+        frame_shape=(640, 480),
+        target_seen_at=None,
+    )
+    brain.serial = FakeSerial()
+
+    try:
+        snap = brain.snapshot()
+        assert snap.serial_connected is True
+        assert snap.serial_monitor.port == "/dev/cu.usbmodem-test"
+        assert snap.serial_monitor.last_tx == "{\"type\":\"servo\"}"
+        assert snap.serial_monitor.entries[0].direction == "rx"
+    finally:
+        brain.vision.get_snapshot = original_snapshot
+        brain.serial = original_serial
 
 
 def test_reference_audio_prefers_ffmpeg_for_mp3(monkeypatch):
