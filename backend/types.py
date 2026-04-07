@@ -82,6 +82,16 @@ class SystemStats(BaseModel):
     temp_file_size_mb: float = 0.0
 
 
+class RuntimeComponentStats(BaseModel):
+    requested_mode: str | None = None
+    effective_device: str | None = None
+    backend: str | None = None
+    selection_source: str | None = None
+    semantic_dispatch_mode: str | None = None
+    ram_mb: float | None = None
+    vram_mb: float | None = None
+
+
 class StatusSnapshot(BaseModel):
     ts: str = Field(default_factory=utc_now_iso)
     mode: SystemMode = SystemMode.IDLE
@@ -109,6 +119,10 @@ class StatusSnapshot(BaseModel):
     current_prompt_user: str | None = None
     last_llm_output: str | None = None
     last_spoken_text: str | None = None
+    yolo_person_runtime: RuntimeComponentStats = Field(default_factory=RuntimeComponentStats)
+    yolo_pose_runtime: RuntimeComponentStats = Field(default_factory=RuntimeComponentStats)
+    tts_runtime: RuntimeComponentStats = Field(default_factory=RuntimeComponentStats)
+    ollama_runtime: RuntimeComponentStats = Field(default_factory=RuntimeComponentStats)
     event_log: list[str] = Field(default_factory=list)
 
 

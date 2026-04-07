@@ -89,7 +89,13 @@ ollama pull llama3.1
 後端：
 
 ```bash
-uv run uvicorn backend.app:app --reload
+uv run python -m backend.app --reload
+```
+
+如要跳過 TTS 啟動 benchmark：
+
+```bash
+uv run python -m backend.app --skip-tts-benchmark
 ```
 
 前端：
@@ -136,5 +142,18 @@ npm run build
 - 若要用 backend OpenCV 直接開相機，macOS 需要對啟動後端的終端或 IDE 單獨授權 Camera。
 - Windows 預設會把 YOLO 與 Fish Audio TTS 放到 `cuda:0`，並把本程序的 CUDA 記憶體上限設成 `72%`，保留剩餘 VRAM 給 Ollama；可用 `MOMO_CUDA_MEMORY_FRACTION` 覆寫。
 - macOS 會讓 YOLO 走 `cpu`，Fish Audio TTS 走 `MPS`。
+- 若 `TTS Device` 在 UI 或 config 是 `auto`，後端啟動時會 benchmark 三個候選：
+  - `cpu`
+  - 加速器單裝置：Windows `gpu` / macOS `mps`
+  - `semantic-auto-*`：只把 Fish semantic transformer 交給 `accelerate.load_checkpoint_and_dispatch(..., device_map="auto")`，decoder 仍留在單一裝置
+- 啟動 benchmark 的優先序是：
+  - 1. 使用者在 UI 明確選的 device
+  - 2. `auto` benchmark 選出的最快 device
+  - 3. 程式原始 default
+- 當 `auto` benchmark 選出結果後，runtime 會把目前生效的 `TTS Device` 視為 benchmark 選中的 device，所以 UI 顯示的會是實際生效值，不會一直停在 `auto`。
+- `--skip-tts-benchmark` 只會跳過這段啟動 benchmark，直接使用目前 config 的 `TTS Device`。
+- UI 頂部的 YOLO / TTS / Ollama device 與 RAM / VRAM 會即時顯示目前生效裝置。
+  - Ollama 的數字來自它自己的 runtime 回報。
+  - YOLO / TTS 的數字是本程序在模型 warmup / preload 時量到的 component footprint，屬於近似值。
 - `GET /api/audio/devices` 會列出本機 output devices，UI 可直接切換播放輸出。
 - 前端 production build 已在 Node 22 驗證通過；Node 25 不建議使用。

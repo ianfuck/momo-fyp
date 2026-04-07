@@ -8,7 +8,9 @@ import re
 import shutil
 import subprocess
 import threading
+import time
 import warnings
+from dataclasses import dataclass
 from pathlib import Path
 
 import librosa
@@ -16,6 +18,13 @@ import numpy as np
 import soundfile as sf
 
 from backend.device_utils import backend_label_for_device, get_tts_device
+from backend.telemetry.system_stats import capture_process_footprint, diff_process_footprint
+from backend.tts.semantic_runtime import (
+    SemanticBenchmarkResult,
+    benchmark_plans_for_current_host,
+    cleanup_torch_memory,
+    make_semantic_queue,
+)
 
 _FISH_CONTROL_TOKEN_RE = re.compile(r"\([^()]{1,40}\)")
 _REQUIRED_MODEL_FILES = (
@@ -25,6 +34,13 @@ _REQUIRED_MODEL_FILES = (
     "special_tokens.json",
     "tokenizer.tiktoken",
 )
+
+
+@dataclass(frozen=True)
+class TTSAutoBenchmarkSelection:
+    tts: "FishCloneTTS"
+    result: SemanticBenchmarkResult
+    results: list[SemanticBenchmarkResult]
 
 
 def _fish_configs_dir() -> Path:
@@ -77,11 +93,13 @@ class FishCloneTTS:
         ref_text_path: str,
         clone_voice_enabled: bool = True,
         device_mode: str = "auto",
+        semantic_dispatch_mode: str = "single",
     ) -> None:
         self.model_path = model_path
         self.ref_audio_path = ref_audio_path
         self.ref_text_path = ref_text_path
         self.clone_voice_enabled = clone_voice_enabled
+        self.semantic_dispatch_mode = semantic_dispatch_mode
         self.loaded = False
         self._model_manager = None
         self._engine = None
@@ -117,12 +135,26 @@ class FishCloneTTS:
         import torch
 
         precision = torch.half if self.device.startswith("cuda") else torch.bfloat16
-        llama_queue = text2semantic_module.launch_thread_safe_queue(
-            checkpoint_path=self.model_path,
-            device=self.device,
-            precision=precision,
-            compile=False,
-        )
+        active_dispatch_mode = self.semantic_dispatch_mode
+        try:
+            llama_queue = make_semantic_queue(
+                checkpoint_path=self.model_path,
+                device=self.device,
+                precision=precision,
+                semantic_dispatch_mode=active_dispatch_mode,
+                compile=False,
+            )
+        except Exception:
+            if active_dispatch_mode != "auto":
+                raise
+            active_dispatch_mode = "single"
+            llama_queue = text2semantic_module.launch_thread_safe_queue(
+                checkpoint_path=self.model_path,
+                device=self.device,
+                precision=precision,
+                compile=False,
+            )
+        self.semantic_dispatch_mode = active_dispatch_mode
         decoder_model = _load_fish_decoder_model(
             config_name="modded_dac_vq",
             checkpoint_path=str(Path(self.model_path) / "codec.pth"),
@@ -136,12 +168,12 @@ class FishCloneTTS:
         )
         self.loaded = True
 
-    def synthesize(self, text: str, output_path: str) -> str:
+    def synthesize(self, text: str, output_path: str, *, request_overrides: dict | None = None) -> str:
         output = Path(output_path)
         output.parent.mkdir(parents=True, exist_ok=True)
         with self._lock:
             self._ensure_model()
-            request = self._build_request(text)
+            request = self._build_request(text, request_overrides=request_overrides)
             wav, sr = self._run_inference(request)
         wav = self._select_best_waveform(wav, sr)
         if self._looks_broken(wav, sr) and platform.system() == "Darwin":
@@ -149,24 +181,99 @@ class FishCloneTTS:
         sf.write(output, wav, sr)
         return str(output)
 
-    def _build_request(self, text: str):
+    @classmethod
+    def benchmark_auto_profiles(
+        cls,
+        model_path: str,
+        ref_audio_path: str,
+        ref_text_path: str,
+        *,
+        clone_voice_enabled: bool,
+        sample_text: str = "這是一個系統啟動測試。",
+    ) -> TTSAutoBenchmarkSelection | None:
+        plans = benchmark_plans_for_current_host()
+        if not plans:
+            return None
+        results: list[SemanticBenchmarkResult] = []
+        best_tts: FishCloneTTS | None = None
+        best_result: SemanticBenchmarkResult | None = None
+        for plan in plans:
+            candidate = cls(
+                model_path,
+                ref_audio_path,
+                ref_text_path,
+                clone_voice_enabled=clone_voice_enabled,
+                device_mode=plan.device_mode,
+                semantic_dispatch_mode=plan.semantic_dispatch_mode,
+            )
+            started = time.monotonic()
+            before = capture_process_footprint(candidate.device)
+            try:
+                candidate.preload()
+                candidate.synthesize(
+                    sample_text,
+                    f"tmp/tts_benchmark_{plan.name}.wav",
+                    request_overrides={
+                        "chunk_length": 80,
+                        "max_new_tokens": 96,
+                        "temperature": 0.55,
+                    },
+                )
+                after = capture_process_footprint(candidate.device)
+                ram_mb, vram_mb = diff_process_footprint(before, after)
+                elapsed_ms = int((time.monotonic() - started) * 1000)
+                result = SemanticBenchmarkResult(
+                    name=plan.name,
+                    device_mode=plan.device_mode,
+                    semantic_dispatch_mode=candidate.semantic_dispatch_mode,
+                    elapsed_ms=elapsed_ms,
+                    ok=True,
+                    ram_mb=ram_mb,
+                    vram_mb=vram_mb,
+                )
+                if best_result is None or elapsed_ms < best_result.elapsed_ms:
+                    best_tts = candidate
+                    best_result = result
+                else:
+                    cleanup_torch_memory()
+            except Exception as exc:
+                cleanup_torch_memory()
+                result = SemanticBenchmarkResult(
+                    name=plan.name,
+                    device_mode=plan.device_mode,
+                    semantic_dispatch_mode=plan.semantic_dispatch_mode,
+                    elapsed_ms=-1,
+                    ok=False,
+                    detail=str(exc),
+                )
+            results.append(result)
+        if best_tts is None or best_result is None:
+            return None
+        return TTSAutoBenchmarkSelection(tts=best_tts, result=best_result, results=results)
+
+    def _build_request(self, text: str, *, request_overrides: dict | None = None):
         schema_module = importlib.import_module("fish_speech.utils.schema")
         references = []
         if self.clone_voice_enabled:
             ref_audio = self._prepare_reference_audio_bytes()
             ref_text = self._load_reference_text() or ""
             references = [schema_module.ServeReferenceAudio(audio=ref_audio, text=ref_text)]
+        payload = {
+            "text": text,
+            "references": references,
+            "reference_id": None,
+            "use_memory_cache": "on",
+            "chunk_length": 200,
+            "max_new_tokens": 1024,
+            "top_p": 0.8,
+            "repetition_penalty": 1.1,
+            "temperature": 0.7,
+            "format": "wav",
+        }
+        if request_overrides:
+            payload.update(request_overrides)
         return schema_module.ServeTTSRequest(
-            text=text,
-            references=references,
-            reference_id=None,
-            use_memory_cache="on",
-            chunk_length=200,
-            max_new_tokens=1024,
-            top_p=0.8,
-            repetition_penalty=1.1,
-            temperature=0.7,
-            format="wav",
+            **payload,
         )
 
     def _run_inference(self, request) -> tuple[np.ndarray, int]:

@@ -1,19 +1,27 @@
 from __future__ import annotations
 
+import argparse
 import asyncio
 import contextlib
 import os
+import sys
 import time
 from collections import deque
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import uvicorn
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.audio.player import AudioPlayer
 from backend.config import build_field_catalog, merge_config, validate_runtime_config
-from backend.device_utils import expected_accelerator_label, expected_tts_backend_label, expected_vision_backend_label
+from backend.device_utils import (
+    backend_label_for_device,
+    expected_accelerator_label,
+    expected_tts_backend_label,
+    expected_vision_backend_label,
+)
 from backend.llm.ollama_client import OllamaClient
 from backend.model_manager import ensure_runtime_models
 from backend.prompting.prompt_builder import PromptBuilder, validate_generated_sentence
@@ -22,9 +30,9 @@ from backend.serial.esp32_link import ESP32Link
 from backend.servo.geometry import compute_servo_angles
 from backend.state_machine import RuntimeState
 from backend.storage.csv_logger import append_audience_snapshot
-from backend.telemetry.system_stats import get_system_stats
-from backend.tts.qwen_clone import FishCloneTTS
-from backend.types import ConfigUpdateResponse, PipelineStage, RuntimeConfig, SystemMode
+from backend.telemetry.system_stats import capture_process_footprint, diff_process_footprint, get_system_stats
+from backend.tts.qwen_clone import FishCloneTTS, TTSAutoBenchmarkSelection
+from backend.types import ConfigUpdateResponse, PipelineStage, RuntimeComponentStats, RuntimeConfig, SystemMode
 from backend.vision.runtime import VisionRuntime
 
 TTS_EMOTION_TAGS = (
@@ -88,15 +96,31 @@ class Brain:
         self.prompts = PromptBuilder("resource/md/system-persona_tracking.md", "resource/md/system-persona_idle.md")
         self.resources = ResourceManager("tmp")
         self.audio = AudioPlayer()
-        self.tts = FishCloneTTS(
-            self.config.tts_model_path,
-            self.config.tts_ref_audio_path,
-            self.config.tts_ref_text_path,
-            clone_voice_enabled=self.config.tts_clone_voice_enabled,
-            device_mode=self.config.tts_device_mode,
-        )
+        self.tts_benchmark_selected: str | None = None
+        self.tts_benchmark_results: list[str] = []
+        self.tts_runtime = RuntimeComponentStats()
+        self.tts = self._build_tts_runtime(selection_source="default")
         self.serial = ESP32Link(self.config.serial_port, self.config.serial_baud_rate)
         self.vision = VisionRuntime(self.config)
+        self.yolo_person_runtime = RuntimeComponentStats(
+            requested_mode=self.config.yolo_device_mode,
+            effective_device=self.vision.detector.device,
+            backend=backend_label_for_device(self.vision.detector.device),
+            selection_source="default",
+        )
+        self.yolo_pose_runtime = RuntimeComponentStats(
+            requested_mode=self.config.yolo_device_mode,
+            effective_device=self.vision.pose.device,
+            backend=backend_label_for_device(self.vision.pose.device),
+            selection_source="default",
+        )
+        self.ollama_runtime = RuntimeComponentStats(
+            requested_mode=self.config.ollama_device_mode,
+            effective_device=self._expected_ollama_backend_label(expected_accelerator_label()),
+            backend=self._expected_ollama_backend_label(expected_accelerator_label()),
+            selection_source="default",
+        )
+        self.ollama_connected = False
         self.history: deque[str] = deque(maxlen=10)
         self.last_target_seen = 0.0
         self.lock_started_at: float | None = None
@@ -125,18 +149,101 @@ class Brain:
 
     def _prepare_runtime_models(self) -> None:
         ensure_runtime_models(self.config)
-        self.tts = FishCloneTTS(
+        self.tts = self._select_tts_runtime(selection_source="default")
+        try:
+            if not self.tts.loaded:
+                tts_device = getattr(self.tts, "device", None)
+                before = capture_process_footprint(tts_device)
+                self.tts.preload()
+                after = capture_process_footprint(tts_device)
+                ram_mb, vram_mb = diff_process_footprint(before, after)
+                self.tts_runtime.ram_mb = ram_mb
+                self.tts_runtime.vram_mb = vram_mb
+        except Exception as exc:
+            self.state.event_log = [f"TTS preload failed: {exc}", *self.state.event_log][:20]
+        self.vision = VisionRuntime(self.config)
+        person_device = getattr(getattr(self.vision, "detector", None), "device", None)
+        pose_device = getattr(getattr(self.vision, "pose", None), "device", None)
+        self.yolo_person_runtime = RuntimeComponentStats(
+            requested_mode=self.config.yolo_device_mode,
+            effective_device=person_device,
+            backend=backend_label_for_device(person_device or "cpu") if person_device else None,
+            selection_source="default",
+        )
+        self.yolo_pose_runtime = RuntimeComponentStats(
+            requested_mode=self.config.yolo_device_mode,
+            effective_device=pose_device,
+            backend=backend_label_for_device(pose_device or "cpu") if pose_device else None,
+            selection_source="default",
+        )
+
+    def _build_tts_runtime(
+        self,
+        selection: TTSAutoBenchmarkSelection | None = None,
+        *,
+        selection_source: str,
+    ) -> FishCloneTTS:
+        if selection is not None:
+            requested_mode = self.config.tts_device_mode
+            selected_mode = getattr(selection.result, "device_mode", getattr(selection.tts, "device_mode", self.config.tts_device_mode))
+            self.config.tts_device_mode = selected_mode
+            self.tts_benchmark_selected = selection.result.name
+            self.tts_benchmark_results = [
+                f"{item.name}:{'ok' if item.ok else 'error'}:{item.elapsed_ms}:{item.semantic_dispatch_mode}"
+                + (f":{item.detail}" if item.detail else "")
+                for item in selection.results
+            ]
+            self.tts_runtime = RuntimeComponentStats(
+                requested_mode=requested_mode,
+                effective_device=getattr(selection.tts, "device", None),
+                backend=getattr(selection.tts, "device_backend", None),
+                selection_source="benchmark",
+                semantic_dispatch_mode=getattr(selection.tts, "semantic_dispatch_mode", None),
+                ram_mb=getattr(selection.result, "ram_mb", None),
+                vram_mb=getattr(selection.result, "vram_mb", None),
+            )
+            return selection.tts
+
+        self.tts_benchmark_selected = None
+        self.tts_benchmark_results = []
+        tts = FishCloneTTS(
             self.config.tts_model_path,
             self.config.tts_ref_audio_path,
             self.config.tts_ref_text_path,
             clone_voice_enabled=self.config.tts_clone_voice_enabled,
             device_mode=self.config.tts_device_mode,
         )
-        try:
-            self.tts.preload()
-        except Exception as exc:
-            self.state.event_log = [f"TTS preload failed: {exc}", *self.state.event_log][:20]
-        self.vision = VisionRuntime(self.config)
+        self.tts_runtime = RuntimeComponentStats(
+            requested_mode=self.config.tts_device_mode,
+            effective_device=getattr(tts, "device", None),
+            backend=getattr(tts, "device_backend", None),
+            selection_source=selection_source,
+            semantic_dispatch_mode=getattr(tts, "semantic_dispatch_mode", None),
+        )
+        return tts
+
+    def _select_tts_runtime(self, *, selection_source: str) -> FishCloneTTS:
+        if self.config.tts_device_mode != "auto" or should_skip_tts_benchmark():
+            return self._build_tts_runtime(selection_source=selection_source)
+
+        selection = FishCloneTTS.benchmark_auto_profiles(
+            self.config.tts_model_path,
+            self.config.tts_ref_audio_path,
+            self.config.tts_ref_text_path,
+            clone_voice_enabled=self.config.tts_clone_voice_enabled,
+        )
+        if selection is None:
+            self.state.event_log = [
+                "TTS auto benchmark did not find a usable profile; falling back to default auto mode.",
+                *self.state.event_log,
+            ][:20]
+            return self._build_tts_runtime(selection_source=selection_source)
+
+        self.state.event_log = [
+            f"TTS benchmark selected {selection.result.name} in {selection.result.elapsed_ms} ms.",
+            *self.state.event_log,
+        ][:20]
+        return self._build_tts_runtime(selection, selection_source="benchmark")
 
     async def _print_startup_diagnostics(self) -> None:
         for line in await self._collect_startup_diagnostics():
@@ -148,8 +255,9 @@ class Brain:
         vision_expected = expected_vision_backend_label(self.config.yolo_device_mode)
         lines = [f"[startup] expected_accelerator={expected}", f"[startup] expected_vision_backend={vision_expected}"]
         try:
-            person_backend = await asyncio.to_thread(self.vision.detector.warmup)
-            pose_backend = await asyncio.to_thread(self.vision.pose.warmup)
+            await asyncio.to_thread(self._refresh_vision_runtime_stats)
+            person_backend = self.yolo_person_runtime.backend or "unknown"
+            pose_backend = self.yolo_pose_runtime.backend or "unknown"
             lines.append(
                 f"[startup] yolo person={person_backend} pose={pose_backend} target={vision_expected} ok={person_backend == vision_expected and pose_backend == vision_expected}"
             )
@@ -159,6 +267,10 @@ class Brain:
         lines.append(
             f"[startup] tts backend={self.tts.device_backend} target={tts_expected} loaded={self.tts.loaded} ok={self.tts.device_backend == tts_expected}"
         )
+        if self.tts_benchmark_selected:
+            lines.append(f"[startup] tts benchmark selected={self.tts_benchmark_selected}")
+        if self.tts_benchmark_results:
+            lines.append(f"[startup] tts benchmark results={'; '.join(self.tts_benchmark_results)}")
 
         try:
             ollama = OllamaClient(self.config.ollama_base_url, min(self.config.ollama_timeout_sec, 30), self.config.ollama_device_mode)
@@ -193,6 +305,79 @@ class Brain:
             return "auto"
         return accelerator
 
+    def _refresh_vision_runtime_stats(self, person_backend: str | None = None, pose_backend: str | None = None) -> None:
+        person_device = getattr(self.vision.detector, "device", "cpu")
+        pose_device = getattr(self.vision.pose, "device", "cpu")
+        if person_backend is None:
+            person_backend = backend_label_for_device(person_device)
+        if pose_backend is None:
+            pose_backend = backend_label_for_device(pose_device)
+        person_before = capture_process_footprint(person_device)
+        person_backend = self.vision.detector.warmup()
+        person_after = capture_process_footprint(person_device)
+        person_ram_mb, person_vram_mb = diff_process_footprint(person_before, person_after)
+        pose_before = capture_process_footprint(pose_device)
+        pose_backend = self.vision.pose.warmup()
+        pose_after = capture_process_footprint(pose_device)
+        pose_ram_mb, pose_vram_mb = diff_process_footprint(pose_before, pose_after)
+        source = "default" if self.config.yolo_device_mode == RuntimeConfig().yolo_device_mode else "user"
+        self.yolo_person_runtime = RuntimeComponentStats(
+            requested_mode=self.config.yolo_device_mode,
+            effective_device=person_device,
+            backend=person_backend,
+            selection_source=source,
+            ram_mb=person_ram_mb,
+            vram_mb=person_vram_mb,
+        )
+        self.yolo_pose_runtime = RuntimeComponentStats(
+            requested_mode=self.config.yolo_device_mode,
+            effective_device=pose_device,
+            backend=pose_backend,
+            selection_source=source,
+            ram_mb=pose_ram_mb,
+            vram_mb=pose_vram_mb,
+        )
+
+    async def refresh_runtime_status(self) -> None:
+        await self._refresh_ollama_runtime_stats()
+
+    async def _refresh_ollama_runtime_stats(self) -> None:
+        accelerator = expected_accelerator_label()
+        source = "default" if self.config.ollama_device_mode == RuntimeConfig().ollama_device_mode else "user"
+        runtime = RuntimeComponentStats(
+            requested_mode=self.config.ollama_device_mode,
+            effective_device=self._expected_ollama_backend_label(accelerator),
+            backend=self._expected_ollama_backend_label(accelerator),
+            selection_source=source,
+        )
+        try:
+            client = OllamaClient(
+                self.config.ollama_base_url,
+                min(self.config.ollama_timeout_sec, 15),
+                self.config.ollama_device_mode,
+            )
+            running = await client.running_models()
+            current = next(
+                (
+                    item for item in running
+                    if item.get("name") == self.config.ollama_model or item.get("model") == self.config.ollama_model
+                ),
+                None,
+            )
+            if current is not None:
+                size_vram = int(current.get("size_vram", 0))
+                total_size = int(current.get("size", 0))
+                backend = accelerator if size_vram > 0 else "cpu"
+                runtime.effective_device = backend
+                runtime.backend = backend
+                runtime.vram_mb = round(size_vram / (1024 * 1024), 2) if size_vram else 0.0
+                if total_size > 0:
+                    runtime.ram_mb = round(max(total_size - size_vram, 0) / (1024 * 1024), 2)
+            self.ollama_connected = True
+        except Exception:
+            self.ollama_connected = False
+        self.ollama_runtime = runtime
+
     def snapshot(self):
         vision = self.vision.get_snapshot()
         self.state.audience = vision.features
@@ -203,8 +388,12 @@ class Brain:
         snap.tts_loaded = self.tts.loaded
         snap.camera_device_id = self.config.camera_device_id
         snap.camera_mode = f"{self.config.camera_width}x{self.config.camera_height}@{self.config.camera_fps}"
-        snap.ollama_connected = True
+        snap.ollama_connected = self.ollama_connected
         snap.playback_progress = self.audio.progress()
+        snap.yolo_person_runtime = self.yolo_person_runtime
+        snap.yolo_pose_runtime = self.yolo_pose_runtime
+        snap.tts_runtime = self.tts_runtime
+        snap.ollama_runtime = self.ollama_runtime
         return snap
 
     async def housekeeping_loop(self) -> None:
@@ -656,6 +845,10 @@ def should_prepare_models() -> bool:
     return os.getenv("MOMO_SKIP_MODEL_BOOTSTRAP") != "1"
 
 
+def should_skip_tts_benchmark() -> bool:
+    return os.getenv("MOMO_SKIP_TTS_BENCHMARK") == "1"
+
+
 async def build_apply_checks(payload: dict, config: RuntimeConfig) -> list[dict[str, str]]:
     checks: list[dict[str, str]] = []
     changed = set(payload.keys())
@@ -804,6 +997,7 @@ async def health() -> dict[str, str]:
 
 @app.get("/api/status")
 async def get_status():
+    await brain.refresh_runtime_status()
     return brain.snapshot()
 
 
@@ -845,16 +1039,30 @@ async def update_config(payload: dict):
                 requires_pipeline_restart=False,
             )
     changed = [key for key, value in payload.items() if getattr(brain.config, key) != value]
+    changed_keys = set(changed)
     brain.config = merged
     brain.serial = ESP32Link(brain.config.serial_port, brain.config.serial_baud_rate)
-    brain.tts = FishCloneTTS(
-        brain.config.tts_model_path,
-        brain.config.tts_ref_audio_path,
-        brain.config.tts_ref_text_path,
-        clone_voice_enabled=brain.config.tts_clone_voice_enabled,
-        device_mode=brain.config.tts_device_mode,
-    )
+    if changed_keys & {
+        "tts_model_path",
+        "tts_device_mode",
+        "tts_clone_voice_enabled",
+        "tts_ref_audio_path",
+        "tts_ref_text_path",
+    }:
+        if "tts_device_mode" in changed_keys:
+            requested_mode = str(payload.get("tts_device_mode", brain.config.tts_device_mode))
+            source = "user" if requested_mode != RuntimeConfig().tts_device_mode else "default"
+        else:
+            source = brain.tts_runtime.selection_source or "default"
+        brain.tts = brain._select_tts_runtime(selection_source=source)
     brain.vision.reconfigure(brain.config)
+    if changed_keys & {"yolo_model_path", "yolo_pose_model_path", "yolo_device_mode"}:
+        try:
+            await asyncio.to_thread(brain._refresh_vision_runtime_stats)
+        except Exception as exc:
+            brain.state.event_log = [f"YOLO warmup failed after config change: {exc}", *brain.state.event_log][:20]
+    if changed_keys & {"ollama_base_url", "ollama_model", "ollama_device_mode"}:
+        await brain.refresh_runtime_status()
     apply_checks = await build_apply_checks(payload, brain.config)
     return ConfigUpdateResponse(
         applied_config=brain.config,
@@ -943,3 +1151,23 @@ async def simulate_pipeline(payload: dict):
         brain.state.audience.distance_class = str(payload["distance_class"])
     await brain.generate_tracking_line()
     return {"snapshot": brain.snapshot()}
+
+
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(description="Run the Momo backend.")
+    parser.add_argument("--host", default=os.getenv("MOMO_HOST", "127.0.0.1"))
+    parser.add_argument("--port", type=int, default=int(os.getenv("MOMO_PORT", "8000")))
+    parser.add_argument("--reload", action="store_true")
+    parser.add_argument(
+        "--skip-tts-benchmark",
+        action="store_true",
+        help="Skip startup TTS benchmark auto-selection and use the configured TTS device mode directly.",
+    )
+    args = parser.parse_args(argv)
+    if args.skip_tts_benchmark:
+        os.environ["MOMO_SKIP_TTS_BENCHMARK"] = "1"
+    uvicorn.run("backend.app:app", host=args.host, port=args.port, reload=args.reload)
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

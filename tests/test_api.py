@@ -1,10 +1,12 @@
 import asyncio
+import os
 import time
 from pathlib import Path
 
 import numpy as np
 from fastapi.testclient import TestClient
 
+import backend.app as app_module
 from backend.app import app, brain
 from backend.tts.qwen_clone import QwenCloneTTS
 from backend.types import AudienceFeatures, PipelineStage, ServoTelemetry
@@ -24,6 +26,10 @@ def test_status_endpoint_returns_pipeline_and_stats():
     assert "tts_emotion_applied" in payload
     assert "tts_emotion_used" in payload
     assert "tts_input_text" in payload
+    assert "tts_runtime" in payload
+    assert "ollama_runtime" in payload
+    assert "yolo_person_runtime" in payload
+    assert "yolo_pose_runtime" in payload
 
 
 def test_simulate_pipeline_returns_prompt_and_snapshot():
@@ -379,6 +385,98 @@ def test_prepare_runtime_models_does_not_crash_on_tts_preload_failure(monkeypatc
         brain.vision = original_vision
         brain.tts = original_tts
         brain.state.event_log = original_event_log
+
+
+def test_select_tts_runtime_uses_benchmark_when_auto(monkeypatch):
+    original_tts = brain.tts
+    original_config = brain.config.model_copy(deep=True)
+    original_event_log = list(brain.state.event_log)
+
+    class FakeTTS:
+        loaded = True
+        device_backend = "gpu"
+        device = "cuda:0"
+        semantic_dispatch_mode = "auto"
+
+        def __init__(self, *args, **kwargs):
+            self.device_mode = kwargs.get("device_mode", "auto")
+
+        @classmethod
+        def benchmark_auto_profiles(cls, *args, **kwargs):
+            return FakeSelection()
+
+    class FakeSelection:
+        def __init__(self):
+            self.tts = FakeTTS()
+            self.result = type("Result", (), {"name": "semantic-auto-gpu", "elapsed_ms": 321, "device_mode": "gpu"})()
+            self.results = [type("Result", (), {"name": "semantic-auto-gpu", "ok": True, "elapsed_ms": 321, "semantic_dispatch_mode": "auto", "detail": ""})()]
+
+    brain.config.tts_device_mode = "auto"
+    monkeypatch.setattr("backend.app.should_skip_tts_benchmark", lambda: False)
+    monkeypatch.setattr("backend.app.FishCloneTTS", FakeTTS)
+
+    try:
+        selected = brain._select_tts_runtime(selection_source="default")
+        assert selected.semantic_dispatch_mode == "auto"
+        assert brain.tts_benchmark_selected == "semantic-auto-gpu"
+        assert brain.config.tts_device_mode == "gpu"
+        assert brain.tts_runtime.selection_source == "benchmark"
+        assert any("TTS benchmark selected semantic-auto-gpu" in item for item in brain.state.event_log)
+    finally:
+        brain.tts = original_tts
+        brain.config = original_config
+        brain.state.event_log = original_event_log
+        brain.tts_benchmark_selected = None
+        brain.tts_benchmark_results = []
+
+
+def test_select_tts_runtime_skips_benchmark_when_requested(monkeypatch):
+    original_tts = brain.tts
+    original_config = brain.config.model_copy(deep=True)
+
+    class FakeTTS:
+        loaded = False
+        device_backend = "cpu"
+        device = "cpu"
+        semantic_dispatch_mode = "single"
+
+        def __init__(self, *args, **kwargs):
+            self.device_mode = kwargs.get("device_mode", "auto")
+
+    brain.config.tts_device_mode = "auto"
+    monkeypatch.setattr("backend.app.should_skip_tts_benchmark", lambda: True)
+    monkeypatch.setattr("backend.app.FishCloneTTS", FakeTTS)
+
+    try:
+        selected = brain._select_tts_runtime(selection_source="user")
+        assert selected.semantic_dispatch_mode == "single"
+        assert brain.tts_benchmark_selected is None
+        assert brain.tts_runtime.selection_source == "user"
+    finally:
+        brain.tts = original_tts
+        brain.config = original_config
+
+
+def test_main_skip_tts_benchmark_sets_env_and_runs_uvicorn(monkeypatch):
+    original = os.environ.get("MOMO_SKIP_TTS_BENCHMARK")
+    called: dict[str, object] = {}
+
+    def fake_run(app_target: str, **kwargs):
+        called["app_target"] = app_target
+        called["kwargs"] = kwargs
+
+    monkeypatch.setattr(app_module.uvicorn, "run", fake_run)
+    try:
+        app_module.main(["--skip-tts-benchmark", "--host", "0.0.0.0", "--port", "9000"])
+        assert os.environ["MOMO_SKIP_TTS_BENCHMARK"] == "1"
+        assert called["app_target"] == "backend.app:app"
+        assert called["kwargs"]["host"] == "0.0.0.0"
+        assert called["kwargs"]["port"] == 9000
+    finally:
+        if original is None:
+            os.environ.pop("MOMO_SKIP_TTS_BENCHMARK", None)
+        else:
+            os.environ["MOMO_SKIP_TTS_BENCHMARK"] = original
 
 
 def test_get_config_reflects_latest_applied_value():

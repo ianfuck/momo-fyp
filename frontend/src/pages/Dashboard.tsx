@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { CameraPanel } from "../components/CameraPanel";
 import { ConfigPanel } from "../components/ConfigPanel";
+import { DeviceStatusBar } from "../components/DeviceStatusBar";
 import { EventLog } from "../components/EventLog";
 import { PipelineStage } from "../components/PipelineStage";
 import { PromptPanel } from "../components/PromptPanel";
@@ -45,6 +46,10 @@ const initialStatus: StatusSnapshot = {
   pipeline: { stage: "IDLE", elapsed_ms: 0, last_error: null },
   servo: { left_deg: 90, right_deg: 90, tracking_source: "none" },
   stats: { memory_rss_mb: 0, memory_vms_mb: 0, temp_file_count: 0, temp_file_size_mb: 0 },
+  yolo_person_runtime: {},
+  yolo_pose_runtime: {},
+  tts_runtime: {},
+  ollama_runtime: {},
   serial_connected: false,
   ollama_connected: false,
   tts_loaded: false,
@@ -123,6 +128,7 @@ export function Dashboard() {
           Simulate Pipeline
         </button>
       </header>
+      <DeviceStatusBar status={status} />
       <div className="grid">
         <CameraPanel
           status={status}

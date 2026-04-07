@@ -63,6 +63,10 @@ export type StatusSnapshot = {
     temp_file_count: number;
     temp_file_size_mb: number;
   };
+  yolo_person_runtime: RuntimeComponentStats;
+  yolo_pose_runtime: RuntimeComponentStats;
+  tts_runtime: RuntimeComponentStats;
+  ollama_runtime: RuntimeComponentStats;
   camera_device_id?: string | null;
   camera_mode?: string | null;
   serial_connected: boolean;
@@ -80,6 +84,16 @@ export type StatusSnapshot = {
   last_llm_output?: string | null;
   last_spoken_text?: string | null;
   event_log: string[];
+};
+
+export type RuntimeComponentStats = {
+  requested_mode?: string | null;
+  effective_device?: string | null;
+  backend?: string | null;
+  selection_source?: string | null;
+  semantic_dispatch_mode?: string | null;
+  ram_mb?: number | null;
+  vram_mb?: number | null;
 };
 
 export type CameraMode = { width: number; height: number; fps: number };

@@ -51,6 +51,38 @@ body {
   gap: 16px;
 }
 
+.device-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.device-card {
+  background: color-mix(in srgb, var(--panel) 90%, white 10%);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 14px;
+  box-shadow: 0 8px 24px rgba(37, 31, 26, 0.06);
+}
+
+.device-card-header,
+.device-card-metrics {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.device-card-detail {
+  margin: 8px 0;
+  font-size: 13px;
+  opacity: 0.82;
+}
+
+.device-card-metrics {
+  font-size: 13px;
+}
+
 .panel {
   background: color-mix(in srgb, var(--panel) 92%, white 8%);
   border: 1px solid var(--line);

@@ -5,6 +5,7 @@ description = "Interactive audience tracking MVP with Ollama, Fish Audio S1 Mini
 readme = "README.md"
 requires-python = ">=3.11,<3.13"
 dependencies = [
+  "accelerate>=1.10.0",
   "fastapi>=0.116.0",
   "fish-speech==0.1.0",
   "huggingface-hub>=0.34.0",

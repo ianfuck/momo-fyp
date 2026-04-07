@@ -31,6 +31,12 @@ export function StatusTable({
           <tr><th>Camera Mode</th><td>{status.camera_mode ?? "-"}</td></tr>
           <tr><th>Playback</th><td>{Math.round(status.playback_progress * 100)}%</td></tr>
           <tr><th>Pipeline Elapsed</th><td>{status.pipeline.elapsed_ms} ms</td></tr>
+          <tr><th>YOLO Person Device</th><td>{status.yolo_person_runtime.effective_device ?? "-"}</td></tr>
+          <tr><th>YOLO Pose Device</th><td>{status.yolo_pose_runtime.effective_device ?? "-"}</td></tr>
+          <tr><th>TTS Main Device</th><td>{status.tts_runtime.effective_device ?? "-"}</td></tr>
+          <tr><th>TTS Selection Source</th><td>{formatSelectionSource(status.tts_runtime.selection_source)}</td></tr>
+          <tr><th>TTS Semantic Dispatch</th><td>{formatSemanticDispatch(status.tts_runtime.semantic_dispatch_mode)}</td></tr>
+          <tr><th>Ollama Device</th><td>{status.ollama_runtime.effective_device ?? "-"}</td></tr>
           <tr><th>LLM Timeout</th><td>{Number(config.ollama_timeout_sec ?? 0) * 1000 || "-"} ms</td></tr>
           <tr><th>TTS Timeout</th><td>{Number(config.tts_timeout_sec ?? 0) * 1000 || "-"} ms</td></tr>
           <tr><th>LLM Latency</th><td>{status.llm_latency_ms ?? "-"} ms</td></tr>
@@ -46,4 +52,17 @@ export function StatusTable({
       </table>
     </section>
   );
+}
+
+function formatSelectionSource(source?: string | null): string {
+  if (source === "benchmark") return "Auto benchmark winner";
+  if (source === "user") return "Chosen in UI";
+  if (source === "default") return "Default setting";
+  return "-";
+}
+
+function formatSemanticDispatch(mode?: string | null): string {
+  if (mode === "auto") return "Split across CPU + GPU/MPS";
+  if (mode === "single") return "Single device only";
+  return "-";
 }
