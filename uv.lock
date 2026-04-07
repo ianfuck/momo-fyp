@@ -1454,6 +1454,7 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "ultralytics" },
     { name = "uvicorn" },
+    { name = "vector-quantize-pytorch" },
 ]
 
 [package.dev-dependencies]
@@ -1486,6 +1487,7 @@ requires-dist = [
     { name = "typing-extensions", specifier = ">=4.14.0" },
     { name = "ultralytics", specifier = ">=8.4.27" },
     { name = "uvicorn", specifier = ">=0.35.0" },
+    { name = "vector-quantize-pytorch", specifier = "==1.14.24" },
 ]
 
 [package.metadata.requires-dev]
@@ -3195,6 +3197,21 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/e3/ad/4a96c425be6fb67e0621e62d86c402b4a17ab2be7f7c055d9bd2f638b9e2/uvicorn-0.42.0.tar.gz", hash = "sha256:9b1f190ce15a2dd22e7758651d9b6d12df09a13d51ba5bf4fc33c383a48e1775", size = 85393, upload-time = "2026-03-16T06:19:50.077Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/0a/89/f8827ccff89c1586027a105e5630ff6139a64da2515e24dafe860bd9ae4d/uvicorn-0.42.0-py3-none-any.whl", hash = "sha256:96c30f5c7abe6f74ae8900a70e92b85ad6613b745d4879eb9b16ccad15645359", size = 68830, upload-time = "2026-03-16T06:19:48.325Z" },
+]
+
+[[package]]
+name = "vector-quantize-pytorch"
+version = "1.14.24"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "einops" },
+    { name = "einx" },
+    { name = "torch", version = "2.4.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'win32'" },
+    { name = "torch", version = "2.4.1+cu118", source = { registry = "https://download.pytorch.org/whl/cu118" }, marker = "sys_platform == 'win32'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/0b/b0/20d9585813a3921fde976166acc9cd424006572fa909ba20d0c4bec73d0c/vector_quantize_pytorch-1.14.24.tar.gz", hash = "sha256:8f42d7825582851c3420f8e0967da1d4c3fd8117a494145dfde78b75bf41af26", size = 589194, upload-time = "2024-05-17T03:51:36.356Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e9/af/29bc7483238a001d31d99290ab5e6becf3488eb77e1f8323f0c51ecfbe7c/vector_quantize_pytorch-1.14.24-py3-none-any.whl", hash = "sha256:5c5c0c02d9e8a1b08952254af5d73ebfbf57e64486d8a2e0f1068e4053b62636", size = 36877, upload-time = "2024-05-17T03:51:33.705Z" },
 ]
 
 [[package]]

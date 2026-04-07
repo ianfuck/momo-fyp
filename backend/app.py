@@ -26,66 +26,17 @@ from backend.llm.ollama_client import OllamaClient
 from backend.model_manager import ensure_runtime_models
 from backend.prompting.prompt_builder import PromptBuilder, validate_generated_sentence
 from backend.resource_manager import ResourceManager
+from backend.runtime_shutdown import clear_shutdown_request, install_shutdown_signal_bridge, request_shutdown, shutdown_requested
 from backend.serial.esp32_link import ESP32Link
 from backend.servo.geometry import compute_servo_angles
 from backend.state_machine import RuntimeState
 from backend.storage.csv_logger import append_audience_snapshot
 from backend.telemetry.system_stats import capture_process_footprint, diff_process_footprint, get_system_stats
-from backend.tts.qwen_clone import FishCloneTTS, TTSAutoBenchmarkSelection
+from backend.tts.model_profiles import DEFAULT_TTS_MODEL_PROFILE, resolve_tts_model_profile
+from backend.tts.qwen_clone import BenchmarkShutdownRequested, FishCloneTTS, TTSAutoBenchmarkSelection
 from backend.types import ConfigUpdateResponse, PipelineStage, RuntimeComponentStats, RuntimeConfig, SystemMode
 from backend.vision.runtime import VisionRuntime
 
-TTS_EMOTION_TAGS = (
-    "happy",
-    "sad",
-    "angry",
-    "excited",
-    "calm",
-    "nervous",
-    "confident",
-    "surprised",
-    "satisfied",
-    "delighted",
-    "scared",
-    "worried",
-    "upset",
-    "frustrated",
-    "depressed",
-    "empathetic",
-    "embarrassed",
-    "disgusted",
-    "moved",
-    "proud",
-    "relaxed",
-    "grateful",
-    "curious",
-    "sarcastic",
-    "disdainful",
-    "unhappy",
-    "anxious",
-    "hysterical",
-    "indifferent",
-    "uncertain",
-    "doubtful",
-    "confused",
-    "disappointed",
-    "regretful",
-    "guilty",
-    "ashamed",
-    "jealous",
-    "envious",
-    "hopeful",
-    "optimistic",
-    "pessimistic",
-    "nostalgic",
-    "lonely",
-    "bored",
-    "contemptuous",
-    "sympathetic",
-    "compassionate",
-    "determined",
-    "resigned",
-)
 DEFAULT_TTS_EMOTION = "confident"
 
 
@@ -131,6 +82,7 @@ class Brain:
         self.background_tasks: list[asyncio.Task] = []
 
     async def start(self) -> None:
+        clear_shutdown_request()
         if should_prepare_models():
             await asyncio.to_thread(self._prepare_runtime_models)
         await self._print_startup_diagnostics()
@@ -141,6 +93,7 @@ class Brain:
         ]
 
     async def stop(self) -> None:
+        request_shutdown()
         for task in self.background_tasks:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -805,11 +758,13 @@ class Brain:
         self.state.last_spoken_text = text
 
     async def _classify_tts_emotion(self, text: str) -> tuple[str, str]:
+        profile = self._current_tts_model_profile()
+        supported_tags = profile.emotion_tags
         client = OllamaClient(self.config.ollama_base_url, min(self.config.ollama_timeout_sec, 15), self.config.ollama_device_mode)
         prompt = (
             "你是 TTS 情緒標記分類器。"
-            "以下是 Fish Audio S1 支援的情緒標記。"
-            f"你必須只從這個清單選一個最適合該句子的標記並直接輸出，不要解釋：{', '.join(TTS_EMOTION_TAGS)}。\n"
+            f"以下是 {profile.emotion_prompt_label}。"
+            f"你必須只從這個清單選一個最適合該句子的標記並直接輸出，不要解釋：{', '.join(supported_tags)}。\n"
             "每句都一定要有情緒，不可輸出 none、neutral、tone、very、extremely 或其他清單外文字。\n"
             "只可輸出清單中的單一精確 tag，不可加任何修飾詞。\n"
             f"句子：{text}"
@@ -831,12 +786,12 @@ class Brain:
                 timeout=min(self.config.ollama_timeout_sec, 15),
             )
         except Exception:
-            fallback = self._fallback_tts_emotion(text)
+            fallback = self._fallback_tts_emotion(text, profile=profile)
             return fallback, fallback
         candidate = self._clean_tts_emotion(raw) or DEFAULT_TTS_EMOTION
-        normalized = self._normalize_tts_emotion(candidate)
+        normalized = self._normalize_tts_emotion(candidate, profile=profile)
         if normalized is None:
-            normalized = self._fallback_tts_emotion(text)
+            normalized = self._fallback_tts_emotion(text, profile=profile)
         return candidate, normalized
 
     def _clean_tts_emotion(self, raw: str) -> str | None:
@@ -844,26 +799,31 @@ class Brain:
         cleaned = " ".join(cleaned.split())
         return cleaned or None
 
-    def _normalize_tts_emotion(self, raw: str) -> str | None:
+    def _normalize_tts_emotion(self, raw: str, *, profile=None) -> str | None:
         cleaned = self._clean_tts_emotion(raw)
-        return cleaned if cleaned in TTS_EMOTION_TAGS else None
+        active_profile = profile or self._current_tts_model_profile()
+        return cleaned if cleaned in active_profile.emotion_tags else None
 
-    def _fallback_tts_emotion(self, text: str) -> str:
+    def _fallback_tts_emotion(self, text: str, *, profile=None) -> str:
+        active_profile = profile or self._current_tts_model_profile()
         lowered = text.lower()
         if any(token in lowered for token in ("怒", "氣", "恨", "煩", "滾", "閉嘴", "討厭")):
             return "angry"
         if any(token in lowered for token in ("哭", "難過", "悲", "孤獨", "寂寞", "抱歉", "遺憾", "失望")):
             return "sad"
         if any(token in lowered for token in ("怕", "危險", "小心", "糟", "怎麼辦")):
-            return "worried"
+            return "worried" if "worried" in active_profile.emotion_tags else "nervous"
         if any(token in lowered for token in ("?", "？", "嗎", "呢", "為什麼", "怎樣")):
             return "curious"
         if any(token in lowered for token in ("!", "！", "太棒", "好耶", "快", "立刻")):
             return "excited"
-        return DEFAULT_TTS_EMOTION
+        return DEFAULT_TTS_EMOTION if DEFAULT_TTS_EMOTION in active_profile.emotion_tags else active_profile.emotion_tags[0]
 
     def _apply_tts_emotion(self, text: str, emotion: str) -> str:
-        return f"({emotion}) {text}"
+        return self._current_tts_model_profile().format_emotion_text(text, emotion)
+
+    def _current_tts_model_profile(self):
+        return getattr(self.tts, "model_profile", None) or resolve_tts_model_profile(self.config.tts_model_path) or DEFAULT_TTS_MODEL_PROFILE
 
     def _event_summary(self) -> str:
         actions = self.state.audience.actions
@@ -1014,11 +974,24 @@ async def build_apply_checks(payload: dict, config: RuntimeConfig) -> list[dict[
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    await brain.start()
+    restore_signal_handlers = install_shutdown_signal_bridge()
+    startup_interrupted = False
     try:
+        try:
+            await brain.start()
+        except BenchmarkShutdownRequested:
+            if not shutdown_requested():
+                raise
+            startup_interrupted = True
         yield
     finally:
-        await brain.stop()
+        request_shutdown()
+        try:
+            if not startup_interrupted:
+                await brain.stop()
+        finally:
+            restore_signal_handlers()
+            clear_shutdown_request()
 
 
 app = FastAPI(title="Momo Brain", version="0.2.0", lifespan=lifespan)

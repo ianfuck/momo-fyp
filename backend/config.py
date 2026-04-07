@@ -47,7 +47,7 @@ FIELD_DESCRIPTIONS: dict[str, tuple[str, str, str | None]] = {
     "tracking_examples_selected": ("Tracking Examples", "CSV examples used for stage-aligned tracking prompt generation.", None),
     "idle_examples_selected": ("Idle Examples", "CSV examples used for idle prompt generation.", None),
     "history_max_sentences": ("History Size", "History rollover limit. Fixed at 10 for MVP.", "10"),
-    "tts_model_path": ("TTS Model Path", "Local Fish Audio S1 Mini model path.", None),
+    "tts_model_path": ("TTS Model Path", "Local Fish Audio TTS model path. Supports Fish Speech V1.5 and S1 Mini.", None),
     "tts_device_mode": ("TTS Device", "Device mode for Fish TTS: auto, cpu, or accelerator for this OS.", None),
     "tts_emotion_enabled": ("TTS Emotion", "Let Ollama choose and apply an emotion tag for Fish TTS.", None),
     "tts_clone_voice_enabled": ("Clone Voice", "Use reference audio/text for Fish voice cloning. Turn off for normal TTS.", None),

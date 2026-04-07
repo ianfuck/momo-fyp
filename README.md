@@ -1,6 +1,6 @@
 # Momo MVP
 
-Momo 是一個單機互動裝置 MVP：用 webcam 追蹤觀眾，透過 Ollama 生成文本與 TTS 情緒標記，交給 Fish Audio S1 Mini 做 voice clone 朗讀，再透過 ESP32 控制雙眼 SG90 伺服馬達。
+Momo 是一個單機互動裝置 MVP：用 webcam 追蹤觀眾，透過 Ollama 生成文本與 TTS 情緒標記，交給 Fish Speech V1.5 或 Fish Audio S1 Mini 做 voice clone 朗讀，再透過 ESP32 控制雙眼 SG90 伺服馬達。
 
 ## 架構
 
@@ -56,13 +56,17 @@ Windows + NVIDIA:
 
 ### Hugging Face gated model
 
-Fish Audio S1 Mini 是 gated model。第一次使用前要先：
+Fish Speech V1.5 與 Fish Audio S1 Mini 都是 gated model。第一次使用前要先：
 
 ```bash
 hf auth login
 ```
 
-但光 login 不夠；你還必須先在瀏覽器開啟 <https://huggingface.co/fishaudio/s1-mini> 並同意條款。也可以改用 `HF_TOKEN=...` 啟動後端。
+但光 login 不夠；你還必須先在瀏覽器開啟你要用的模型頁面並同意條款：
+- `Fish Speech V1.5`: <https://huggingface.co/fishaudio/fish-speech-1.5>
+- `Fish Audio S1 Mini`: <https://huggingface.co/fishaudio/s1-mini>
+
+也可以改用 `HF_TOKEN=...` 啟動後端。
 
 也支援專案根目錄 `.env`：
 
@@ -142,6 +146,11 @@ npm run build
 - 若要用 backend OpenCV 直接開相機，macOS 需要對啟動後端的終端或 IDE 單獨授權 Camera。
 - Windows 預設會把 YOLO 與 Fish Audio TTS 放到 `cuda:0`，並把本程序的 CUDA 記憶體上限設成 `72%`，保留剩餘 VRAM 給 Ollama；可用 `MOMO_CUDA_MEMORY_FRACTION` 覆寫。
 - macOS 會讓 YOLO 走 `cpu`，Fish Audio TTS 走 `MPS`。
+- 預設 TTS model path 是 `model/huggingface/hf_snapshots/fishaudio__fish-speech-1.5`。
+- 也支援 `model/huggingface/hf_snapshots/fishaudio__s1-mini`；切換 model path 後，Ollama 的情緒分類清單會自動跟著目前模型切換：
+  - `Fish Speech V1.5`: 只用該模型穩定支援的 basic emotion tags
+  - `Fish Audio S1 Mini`: 用 S1 的完整固定 emotion tag 清單
+- Fish TTS 情緒 tag 會固定包成 `({emotion})中文句子`，括號 tag 永遠放在最前面，避免只讀出 tag 本身。
 - 若 `TTS Device` 在 UI 或 config 是 `auto`，後端啟動時會 benchmark 三個候選：
   - 加速器單裝置：Windows `gpu` / macOS `mps`
   - `semantic-auto-*`：只把 Fish semantic transformer 交給 `accelerate.load_checkpoint_and_dispatch(..., device_map="auto")`，decoder 仍留在單一裝置

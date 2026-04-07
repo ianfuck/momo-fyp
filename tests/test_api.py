@@ -4,12 +4,14 @@ import time
 from pathlib import Path
 
 import numpy as np
+import pytest
 from fastapi.testclient import TestClient
 
 import backend.app as app_module
 import backend.tts.qwen_clone as qwen_module
 from backend.app import app, brain
-from backend.tts.qwen_clone import QwenCloneTTS
+from backend.tts.model_profiles import FISH_AUDIO_S1_MINI_PROFILE, FISH_SPEECH_V1_5_PROFILE, resolve_tts_model_profile
+from backend.tts.qwen_clone import BenchmarkShutdownRequested, QwenCloneTTS
 from backend.tts.semantic_runtime import SemanticBenchmarkResult, SemanticRuntimePlan
 from backend.types import AudienceFeatures, PipelineStage, ServoTelemetry
 from backend.vision.runtime import VisionState
@@ -288,11 +290,11 @@ def test_speak_line_records_emotion_selected_by_ollama_and_applied_to_fish():
 
     try:
         asyncio.run(brain._speak_line("測試台詞。"))
-        assert captured["tts_text"] == "(excited) 測試台詞。"
+        assert captured["tts_text"] == "(excited)測試台詞。"
         assert brain.state.tts_emotion_raw == "excited"
         assert brain.state.tts_emotion_applied == "excited"
         assert brain.state.tts_emotion_used is True
-        assert brain.state.tts_input_text == "(excited) 測試台詞。"
+        assert brain.state.tts_input_text == "(excited)測試台詞。"
         assert brain.state.last_spoken_text == "測試台詞。"
         assert brain.state.pipeline.stage == PipelineStage.PLAYBACK
     finally:
@@ -573,6 +575,38 @@ def test_benchmark_auto_profiles_selects_best_isolated_candidate(monkeypatch):
     assert selection.tts.semantic_dispatch_mode == "auto"
 
 
+def test_benchmark_candidate_subprocess_terminates_when_shutdown_requested(monkeypatch):
+    plan = SemanticRuntimePlan(name="gpu", device_mode="gpu", semantic_dispatch_mode="single")
+    fake_process = type("FakeProcess", (), {"pid": 4321, "returncode": None})()
+
+    def fake_poll():
+        return fake_process.returncode
+
+    fake_process.poll = fake_poll
+
+    terminated = {"called": False}
+
+    def fake_terminate(process):
+        terminated["called"] = True
+        process.returncode = -15
+
+    monkeypatch.setattr(qwen_module.subprocess, "Popen", lambda *args, **kwargs: fake_process)
+    monkeypatch.setattr(qwen_module, "shutdown_requested", lambda: True)
+    monkeypatch.setattr(qwen_module, "_terminate_benchmark_process", fake_terminate)
+
+    with pytest.raises(BenchmarkShutdownRequested, match="shutdown requested"):
+        qwen_module._run_benchmark_candidate_subprocess(
+            plan=plan,
+            model_path="model",
+            ref_audio_path="ref.wav",
+            ref_text_path="ref.txt",
+            clone_voice_enabled=False,
+            sample_text="測試。",
+        )
+
+    assert terminated["called"] is True
+
+
 def test_main_skip_tts_benchmark_sets_env_and_runs_uvicorn(monkeypatch):
     original = os.environ.get("MOMO_SKIP_TTS_BENCHMARK")
     called: dict[str, object] = {}
@@ -794,7 +828,7 @@ def test_load_reference_text_keeps_short_ascii_transcript(tmp_path):
 
 def test_apply_tts_emotion_wraps_text_with_supported_tag():
     tagged = brain._apply_tts_emotion("你好啊。", "excited")
-    assert tagged == "(excited) 你好啊。"
+    assert tagged == "(excited)你好啊。"
 
 
 def test_build_request_skips_references_when_clone_voice_disabled():
@@ -819,6 +853,17 @@ def test_normalize_tts_emotion_accepts_supported_tag_only():
 def test_fallback_tts_emotion_returns_supported_emotion():
     assert brain._fallback_tts_emotion("你為什麼還不來？") == "curious"
     assert brain._fallback_tts_emotion("我真的很孤獨。") == "sad"
+
+
+def test_v1_5_profile_uses_basic_emotion_set_only():
+    assert brain._normalize_tts_emotion("disappointed", profile=FISH_SPEECH_V1_5_PROFILE) is None
+    assert brain._normalize_tts_emotion("sad", profile=FISH_SPEECH_V1_5_PROFILE) == "sad"
+    assert brain._fallback_tts_emotion("怎麼辦，我有點怕。", profile=FISH_SPEECH_V1_5_PROFILE) == "worried"
+
+
+def test_resolve_tts_model_profile_by_model_path():
+    assert resolve_tts_model_profile("model/huggingface/hf_snapshots/fishaudio__fish-speech-1.5") == FISH_SPEECH_V1_5_PROFILE
+    assert resolve_tts_model_profile("model/huggingface/hf_snapshots/fishaudio__s1-mini") == FISH_AUDIO_S1_MINI_PROFILE
 
 
 def test_polish_waveform_applies_fades_and_recenters() -> None:

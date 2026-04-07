@@ -10,6 +10,7 @@ def test_default_ollama_timeout_is_600():
     config = RuntimeConfig()
     assert config.ollama_timeout_sec == 600
     assert config.ollama_model == "qwen3.5:2b"
+    assert config.tts_model_path == "model/huggingface/hf_snapshots/fishaudio__fish-speech-1.5"
 
 
 def test_invalid_config_detected():

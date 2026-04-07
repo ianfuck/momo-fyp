@@ -4,14 +4,17 @@ import json
 import hashlib
 import importlib
 import importlib.util
+import contextlib
 import os
 import platform
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
 import threading
+import time
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,6 +24,8 @@ import numpy as np
 import soundfile as sf
 
 from backend.device_utils import backend_label_for_device, get_tts_device
+from backend.runtime_shutdown import shutdown_requested
+from backend.tts.model_profiles import resolve_tts_model_profile
 from backend.tts.semantic_runtime import (
     SemanticBenchmarkResult,
     benchmark_plans_for_current_host,
@@ -28,13 +33,6 @@ from backend.tts.semantic_runtime import (
 )
 
 _FISH_CONTROL_TOKEN_RE = re.compile(r"\([^()]{1,40}\)")
-_REQUIRED_MODEL_FILES = (
-    "config.json",
-    "model.pth",
-    "codec.pth",
-    "special_tokens.json",
-    "tokenizer.tiktoken",
-)
 
 
 @dataclass(frozen=True)
@@ -44,11 +42,16 @@ class TTSAutoBenchmarkSelection:
     results: list[SemanticBenchmarkResult]
 
 
+class BenchmarkShutdownRequested(RuntimeError):
+    pass
+
+
 _BENCHMARK_REQUEST_OVERRIDES = {
     "chunk_length": 32,
     "max_new_tokens": 24,
     "temperature": 0.35,
 }
+_BENCHMARK_POLL_INTERVAL_SEC = 0.2
 
 
 def _fish_configs_dir() -> Path:
@@ -70,9 +73,16 @@ def _load_fish_decoder_model(config_name: str, checkpoint_path: str, device: str
     except ValueError:
         pass
 
+    config_path = Path(config_name)
     hydra.core.global_hydra.GlobalHydra.instance().clear()
-    with initialize_config_dir(version_base="1.3", config_dir=str(_fish_configs_dir())):
-        cfg = compose(config_name=config_name)
+    if config_path.exists():
+        config_dir = config_path.parent
+        resolved_name = config_path.stem
+    else:
+        config_dir = _fish_configs_dir()
+        resolved_name = config_name
+    with initialize_config_dir(version_base="1.3", config_dir=str(config_dir.resolve())):
+        cfg = compose(config_name=resolved_name)
 
     model = instantiate(cfg)
     state_dict = torch.load(checkpoint_path, map_location=device, mmap=True, weights_only=True)
@@ -112,6 +122,7 @@ class FishCloneTTS:
         self._model_manager = None
         self._engine = None
         self._lock = threading.Lock()
+        self.model_profile = resolve_tts_model_profile(model_path)
         self.available = Path(model_path).exists() and (
             not clone_voice_enabled or (Path(ref_audio_path).exists() and Path(ref_text_path).exists())
         )
@@ -128,7 +139,11 @@ class FishCloneTTS:
         if not self.available:
             raise FileNotFoundError("TTS model or reference files are missing")
 
-        missing = [name for name in _REQUIRED_MODEL_FILES if not (Path(self.model_path) / name).exists()]
+        missing = [
+            name
+            for name in self.model_profile.required_model_files
+            if not (Path(self.model_path) / name).exists()
+        ]
         if missing:
             raise FileNotFoundError(f"Fish Audio model is incomplete at {self.model_path}: missing {', '.join(missing)}")
 
@@ -164,8 +179,8 @@ class FishCloneTTS:
             )
         self.semantic_dispatch_mode = active_dispatch_mode
         decoder_model = _load_fish_decoder_model(
-            config_name="modded_dac_vq",
-            checkpoint_path=str(Path(self.model_path) / "codec.pth"),
+            config_name=self.model_profile.decoder_config_name,
+            checkpoint_path=str(Path(self.model_path) / self.model_profile.decoder_checkpoint_name),
             device=self.device,
         )
         self._engine = inference_engine_module.TTSInferenceEngine(
@@ -227,6 +242,13 @@ class FishCloneTTS:
             semantic_dispatch_mode=best_result.semantic_dispatch_mode,
         )
         return TTSAutoBenchmarkSelection(tts=best_tts, result=best_result, results=results)
+
+    def format_emotion_text(self, text: str, emotion: str) -> str:
+        return self.model_profile.format_emotion_text(text, emotion)
+
+    @property
+    def emotion_tags(self) -> tuple[str, ...]:
+        return self.model_profile.emotion_tags
 
     def _build_request(self, text: str, *, request_overrides: dict | None = None):
         schema_module = importlib.import_module("fish_speech.utils.schema")
@@ -545,6 +567,8 @@ def _run_benchmark_candidate_subprocess(
     timeout_sec = _benchmark_timeout_sec()
     with tempfile.TemporaryDirectory(prefix="momo_tts_bench_") as tmp_dir:
         result_path = Path(tmp_dir) / "result.json"
+        stdout_path = Path(tmp_dir) / "stdout.log"
+        stderr_path = Path(tmp_dir) / "stderr.log"
         command = [
             sys.executable,
             "-m",
@@ -568,27 +592,50 @@ def _run_benchmark_candidate_subprocess(
         ]
         if clone_voice_enabled:
             command.append("--clone-voice-enabled")
-        try:
-            completed = subprocess.run(
-                command,
-                check=False,
-                capture_output=True,
-                text=True,
-                timeout=timeout_sec,
-            )
-        except subprocess.TimeoutExpired:
-            return SemanticBenchmarkResult(
-                name=plan.name,
-                device_mode=plan.device_mode,
-                semantic_dispatch_mode=plan.semantic_dispatch_mode,
-                elapsed_ms=-1,
-                ok=False,
-                detail=f"benchmark timed out after {timeout_sec} seconds",
-            )
+        popen_kwargs = {
+            "stdin": subprocess.DEVNULL,
+            "stdout": None,
+            "stderr": None,
+            "text": True,
+        }
+        if os.name == "nt":
+            popen_kwargs["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        else:
+            popen_kwargs["start_new_session"] = True
+        with (
+            stdout_path.open("w", encoding="utf-8", errors="ignore") as stdout_file,
+            stderr_path.open("w", encoding="utf-8", errors="ignore") as stderr_file,
+        ):
+            popen_kwargs["stdout"] = stdout_file
+            popen_kwargs["stderr"] = stderr_file
+            process = subprocess.Popen(command, **popen_kwargs)
+            try:
+                deadline = time.monotonic() + timeout_sec
+                while process.poll() is None:
+                    if shutdown_requested():
+                        _terminate_benchmark_process(process)
+                        raise BenchmarkShutdownRequested("shutdown requested while benchmarking TTS")
+                    if time.monotonic() >= deadline:
+                        _terminate_benchmark_process(process)
+                        return SemanticBenchmarkResult(
+                            name=plan.name,
+                            device_mode=plan.device_mode,
+                            semantic_dispatch_mode=plan.semantic_dispatch_mode,
+                            elapsed_ms=-1,
+                            ok=False,
+                            detail=f"benchmark timed out after {timeout_sec} seconds",
+                        )
+                    time.sleep(_BENCHMARK_POLL_INTERVAL_SEC)
+            except BaseException:
+                _terminate_benchmark_process(process)
+                raise
         if result_path.exists():
             payload = json.loads(result_path.read_text(encoding="utf-8"))
             return SemanticBenchmarkResult(**payload)
-        detail = (completed.stderr or completed.stdout or f"benchmark subprocess exited with code {completed.returncode}").strip()
+        detail = _read_benchmark_logs(stdout_path, stderr_path)
+        return_code = process.returncode
+        if not detail:
+            detail = f"benchmark subprocess exited with code {return_code}"
         return SemanticBenchmarkResult(
             name=plan.name,
             device_mode=plan.device_mode,
@@ -605,3 +652,41 @@ def _benchmark_timeout_sec() -> int:
         return max(10, int(raw))
     except ValueError:
         return 120
+
+
+def _terminate_benchmark_process(process: subprocess.Popen[str]) -> None:
+    if process.poll() is not None:
+        return
+    if os.name == "nt":
+        with contextlib.suppress(Exception):
+            process.terminate()
+        _wait_for_process_exit(process, timeout=3.0)
+        if process.poll() is None:
+            with contextlib.suppress(Exception):
+                process.kill()
+            _wait_for_process_exit(process, timeout=1.0)
+        return
+
+    with contextlib.suppress(Exception):
+        os.killpg(process.pid, signal.SIGTERM)
+    _wait_for_process_exit(process, timeout=3.0)
+    if process.poll() is None:
+        with contextlib.suppress(Exception):
+            os.killpg(process.pid, signal.SIGKILL)
+        _wait_for_process_exit(process, timeout=1.0)
+
+
+def _wait_for_process_exit(process: subprocess.Popen[str], *, timeout: float) -> None:
+    with contextlib.suppress(Exception):
+        process.wait(timeout=timeout)
+
+
+def _read_benchmark_logs(stdout_path: Path, stderr_path: Path) -> str:
+    chunks: list[str] = []
+    for path in (stderr_path, stdout_path):
+        if not path.exists():
+            continue
+        raw = path.read_text(encoding="utf-8", errors="ignore").strip()
+        if raw:
+            chunks.append(raw)
+    return "\n".join(chunks)

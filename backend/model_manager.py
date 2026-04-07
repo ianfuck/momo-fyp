@@ -5,18 +5,11 @@ import shutil
 import urllib.request
 from pathlib import Path
 
+from backend.tts.model_profiles import resolve_tts_model_profile
 from backend.types import RuntimeConfig
 
 
 ULTRALYTICS_ASSET_BASE = "https://github.com/ultralytics/assets/releases/latest/download"
-DEFAULT_FISH_TTS_REPO = "fishaudio/s1-mini"
-REQUIRED_FISH_TTS_FILES = (
-    "config.json",
-    "model.pth",
-    "codec.pth",
-    "special_tokens.json",
-    "tokenizer.tiktoken",
-)
 
 
 def ensure_runtime_models(config: RuntimeConfig) -> list[dict[str, str]]:
@@ -51,7 +44,8 @@ def _ensure_yolo_asset(target_path: str) -> dict[str, str]:
 
 def _ensure_tts_model(target_path: str) -> dict[str, str]:
     target = Path(target_path)
-    if target.exists() and all((target / name).exists() for name in REQUIRED_FISH_TTS_FILES):
+    profile = resolve_tts_model_profile(target_path)
+    if target.exists() and all((target / name).exists() for name in profile.required_model_files):
         return {
             "component": "tts-model",
             "status": "ok",
@@ -65,22 +59,22 @@ def _ensure_tts_model(target_path: str) -> dict[str, str]:
         from huggingface_hub.errors import GatedRepoError
     except ImportError as exc:
         raise RuntimeError(
-            "huggingface_hub is required to download the Fish Audio S1 Mini model"
+            "huggingface_hub is required to download Fish Audio TTS models"
         ) from exc
 
     try:
         snapshot_download(
-            repo_id=DEFAULT_FISH_TTS_REPO,
+            repo_id=profile.repo_id,
             local_dir=str(target),
             local_dir_use_symlinks=False,
             resume_download=True,
-            allow_patterns=list(REQUIRED_FISH_TTS_FILES),
+            allow_patterns=list(profile.required_model_files),
             token=os.getenv("HF_TOKEN"),
         )
     except GatedRepoError as exc:
         raise RuntimeError(
-            "Fish Audio S1 Mini is a gated Hugging Face model. "
-            "First accept the terms at https://huggingface.co/fishaudio/s1-mini, "
+            f"{profile.display_name} is a gated Hugging Face model. "
+            f"First accept the terms at {profile.huggingface_url}, "
             "then run `hf auth login` or set `HF_TOKEN` before starting Momo."
         ) from exc
     return {

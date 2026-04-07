@@ -1,7 +1,7 @@
 [project]
 name = "momo"
 version = "0.1.0"
-description = "Interactive audience tracking MVP with Ollama, Fish Audio S1 Mini TTS, and ESP32 SG90 eyes"
+description = "Interactive audience tracking MVP with Ollama, Fish Audio TTS, and ESP32 SG90 eyes"
 readme = "README.md"
 requires-python = ">=3.11,<3.13"
 dependencies = [
@@ -25,6 +25,7 @@ dependencies = [
   "typing-extensions>=4.14.0",
   "ultralytics>=8.4.27",
   "uvicorn>=0.35.0",
+  "vector-quantize-pytorch==1.14.24",
 ]
 
 [dependency-groups]
