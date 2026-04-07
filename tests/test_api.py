@@ -7,8 +7,10 @@ import numpy as np
 from fastapi.testclient import TestClient
 
 import backend.app as app_module
+import backend.tts.qwen_clone as qwen_module
 from backend.app import app, brain
 from backend.tts.qwen_clone import QwenCloneTTS
+from backend.tts.semantic_runtime import SemanticBenchmarkResult, SemanticRuntimePlan
 from backend.types import AudienceFeatures, PipelineStage, ServoTelemetry
 from backend.vision.runtime import VisionState
 
@@ -529,6 +531,46 @@ def test_select_tts_runtime_skips_benchmark_when_requested(monkeypatch):
     finally:
         brain.tts = original_tts
         brain.config = original_config
+
+
+def test_benchmark_auto_profiles_selects_best_isolated_candidate(monkeypatch):
+    class FakeTTS(QwenCloneTTS):
+        def __init__(self, *args, device_mode="auto", semantic_dispatch_mode="single", **kwargs):
+            self.model_path = "model"
+            self.ref_audio_path = "ref.wav"
+            self.ref_text_path = "ref.txt"
+            self.clone_voice_enabled = kwargs.get("clone_voice_enabled", True)
+            self.semantic_dispatch_mode = semantic_dispatch_mode
+            self.loaded = False
+            self.device = "cpu" if device_mode == "cpu" else "cuda:0"
+            self.device_backend = "cpu" if device_mode == "cpu" else "gpu"
+
+    monkeypatch.setattr(
+        qwen_module,
+        "benchmark_plans_for_current_host",
+        lambda: [
+            SemanticRuntimePlan(name="gpu", device_mode="gpu", semantic_dispatch_mode="single"),
+            SemanticRuntimePlan(name="semantic-auto-gpu", device_mode="gpu", semantic_dispatch_mode="auto"),
+            SemanticRuntimePlan(name="cpu", device_mode="cpu", semantic_dispatch_mode="single"),
+        ],
+    )
+
+    def fake_runner(**kwargs):
+        plan = kwargs["plan"]
+        if plan.name == "gpu":
+            return SemanticBenchmarkResult(name="gpu", device_mode="gpu", semantic_dispatch_mode="single", elapsed_ms=50, ok=False, detail="oom")
+        if plan.name == "semantic-auto-gpu":
+            return SemanticBenchmarkResult(name="semantic-auto-gpu", device_mode="gpu", semantic_dispatch_mode="auto", elapsed_ms=120, ok=True)
+        return SemanticBenchmarkResult(name="cpu", device_mode="cpu", semantic_dispatch_mode="single", elapsed_ms=900, ok=True)
+
+    monkeypatch.setattr(qwen_module, "_run_benchmark_candidate_subprocess", fake_runner)
+
+    selection = FakeTTS.benchmark_auto_profiles("model", "ref.wav", "ref.txt", clone_voice_enabled=False)
+
+    assert selection is not None
+    assert selection.result.name == "semantic-auto-gpu"
+    assert selection.tts.device_backend == "gpu"
+    assert selection.tts.semantic_dispatch_mode == "auto"
 
 
 def test_main_skip_tts_benchmark_sets_env_and_runs_uvicorn(monkeypatch):

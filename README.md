@@ -147,7 +147,9 @@ npm run build
   - `semantic-auto-*`：只把 Fish semantic transformer 交給 `accelerate.load_checkpoint_and_dispatch(..., device_map="auto")`，decoder 仍留在單一裝置
   - `cpu`
 - benchmark 順序會優先試加速器，再試 `semantic-auto-*`，最後才試 `cpu`，避免在 Windows 先卡住很慢的 CPU 路線。
+- 每個 TTS benchmark candidate 都會用獨立 subprocess 跑，避免前一個 candidate 的 CUDA OOM 或殘留 VRAM 汙染下一個 candidate。
 - 若在 Windows/macOS 明確指定 `gpu` 或 `mps`，但 TTS preload 因 OOM 失敗，後端會自動退回 `auto benchmark` 路線，而不是直接把程式炸掉。
+- 單個 benchmark candidate 預設最長 `120` 秒；可用 `MOMO_TTS_BENCHMARK_TIMEOUT_SEC` 覆寫。
 - 啟動 benchmark 的優先序是：
   - 1. 使用者在 UI 明確選的 device
   - 2. `auto` benchmark 選出的最快 device

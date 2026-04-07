@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+import json
 import hashlib
 import importlib
 import importlib.util
+import os
 import platform
 import re
 import shutil
 import subprocess
+import sys
+import tempfile
 import threading
-import time
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,11 +21,9 @@ import numpy as np
 import soundfile as sf
 
 from backend.device_utils import backend_label_for_device, get_tts_device
-from backend.telemetry.system_stats import capture_process_footprint, diff_process_footprint
 from backend.tts.semantic_runtime import (
     SemanticBenchmarkResult,
     benchmark_plans_for_current_host,
-    cleanup_torch_memory,
     make_semantic_queue,
 )
 
@@ -41,6 +42,13 @@ class TTSAutoBenchmarkSelection:
     tts: "FishCloneTTS"
     result: SemanticBenchmarkResult
     results: list[SemanticBenchmarkResult]
+
+
+_BENCHMARK_REQUEST_OVERRIDES = {
+    "chunk_length": 32,
+    "max_new_tokens": 24,
+    "temperature": 0.35,
+}
 
 
 def _fish_configs_dir() -> Path:
@@ -195,60 +203,29 @@ class FishCloneTTS:
         if not plans:
             return None
         results: list[SemanticBenchmarkResult] = []
-        best_tts: FishCloneTTS | None = None
         best_result: SemanticBenchmarkResult | None = None
         for plan in plans:
-            candidate = cls(
-                model_path,
-                ref_audio_path,
-                ref_text_path,
+            result = _run_benchmark_candidate_subprocess(
+                plan=plan,
+                model_path=model_path,
+                ref_audio_path=ref_audio_path,
+                ref_text_path=ref_text_path,
                 clone_voice_enabled=clone_voice_enabled,
-                device_mode=plan.device_mode,
-                semantic_dispatch_mode=plan.semantic_dispatch_mode,
+                sample_text=sample_text,
             )
-            started = time.monotonic()
-            before = capture_process_footprint(candidate.device)
-            try:
-                candidate.preload()
-                candidate.synthesize(
-                    sample_text,
-                    f"tmp/tts_benchmark_{plan.name}.wav",
-                    request_overrides={
-                        "chunk_length": 32,
-                        "max_new_tokens": 24,
-                        "temperature": 0.35,
-                    },
-                )
-                after = capture_process_footprint(candidate.device)
-                ram_mb, vram_mb = diff_process_footprint(before, after)
-                elapsed_ms = int((time.monotonic() - started) * 1000)
-                result = SemanticBenchmarkResult(
-                    name=plan.name,
-                    device_mode=plan.device_mode,
-                    semantic_dispatch_mode=candidate.semantic_dispatch_mode,
-                    elapsed_ms=elapsed_ms,
-                    ok=True,
-                    ram_mb=ram_mb,
-                    vram_mb=vram_mb,
-                )
-                if best_result is None or elapsed_ms < best_result.elapsed_ms:
-                    best_tts = candidate
-                    best_result = result
-                else:
-                    cleanup_torch_memory()
-            except Exception as exc:
-                cleanup_torch_memory()
-                result = SemanticBenchmarkResult(
-                    name=plan.name,
-                    device_mode=plan.device_mode,
-                    semantic_dispatch_mode=plan.semantic_dispatch_mode,
-                    elapsed_ms=-1,
-                    ok=False,
-                    detail=str(exc),
-                )
+            if result.ok and (best_result is None or result.elapsed_ms < best_result.elapsed_ms):
+                best_result = result
             results.append(result)
-        if best_tts is None or best_result is None:
+        if best_result is None:
             return None
+        best_tts = cls(
+            model_path,
+            ref_audio_path,
+            ref_text_path,
+            clone_voice_enabled=clone_voice_enabled,
+            device_mode=best_result.device_mode,
+            semantic_dispatch_mode=best_result.semantic_dispatch_mode,
+        )
         return TTSAutoBenchmarkSelection(tts=best_tts, result=best_result, results=results)
 
     def _build_request(self, text: str, *, request_overrides: dict | None = None):
@@ -554,3 +531,77 @@ class FishCloneTTS:
 
 
 QwenCloneTTS = FishCloneTTS
+
+
+def _run_benchmark_candidate_subprocess(
+    *,
+    plan,
+    model_path: str,
+    ref_audio_path: str,
+    ref_text_path: str,
+    clone_voice_enabled: bool,
+    sample_text: str,
+) -> SemanticBenchmarkResult:
+    timeout_sec = _benchmark_timeout_sec()
+    with tempfile.TemporaryDirectory(prefix="momo_tts_bench_") as tmp_dir:
+        result_path = Path(tmp_dir) / "result.json"
+        command = [
+            sys.executable,
+            "-m",
+            "backend.tts.benchmark_worker",
+            "--model-path",
+            model_path,
+            "--ref-audio-path",
+            ref_audio_path,
+            "--ref-text-path",
+            ref_text_path,
+            "--device-mode",
+            plan.device_mode,
+            "--plan-name",
+            plan.name,
+            "--semantic-dispatch-mode",
+            plan.semantic_dispatch_mode,
+            "--sample-text",
+            sample_text,
+            "--result-path",
+            str(result_path),
+        ]
+        if clone_voice_enabled:
+            command.append("--clone-voice-enabled")
+        try:
+            completed = subprocess.run(
+                command,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=timeout_sec,
+            )
+        except subprocess.TimeoutExpired:
+            return SemanticBenchmarkResult(
+                name=plan.name,
+                device_mode=plan.device_mode,
+                semantic_dispatch_mode=plan.semantic_dispatch_mode,
+                elapsed_ms=-1,
+                ok=False,
+                detail=f"benchmark timed out after {timeout_sec} seconds",
+            )
+        if result_path.exists():
+            payload = json.loads(result_path.read_text(encoding="utf-8"))
+            return SemanticBenchmarkResult(**payload)
+        detail = (completed.stderr or completed.stdout or f"benchmark subprocess exited with code {completed.returncode}").strip()
+        return SemanticBenchmarkResult(
+            name=plan.name,
+            device_mode=plan.device_mode,
+            semantic_dispatch_mode=plan.semantic_dispatch_mode,
+            elapsed_ms=-1,
+            ok=False,
+            detail=detail[-1200:],
+        )
+
+
+def _benchmark_timeout_sec() -> int:
+    raw = os.getenv("MOMO_TTS_BENCHMARK_TIMEOUT_SEC", "120")
+    try:
+        return max(10, int(raw))
+    except ValueError:
+        return 120
