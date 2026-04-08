@@ -173,7 +173,7 @@ class RuntimeConfig(BaseModel):
     camera_flip_vertical: bool = True
     yolo_model_path: str = "model/yolo/yolo26n.pt"
     yolo_pose_model_path: str = "model/yolo/yolo26n-pose.pt"
-    yolo_device_mode: str = "auto"
+    yolo_device_mode: str = "cpu"
     lock_bbox_threshold_ratio: float = 0.12
     unlock_bbox_threshold_ratio: float | None = None
     enter_debounce_ms: int = 1000
