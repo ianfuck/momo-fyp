@@ -168,7 +168,7 @@ class RuntimeConfig(BaseModel):
     camera_device_id: str = "default"
     camera_width: int = 640
     camera_height: int = 480
-    camera_fps: int = 10
+    camera_fps: int = 30
     camera_mirror_preview: bool = False
     camera_flip_vertical: bool = True
     yolo_model_path: str = "model/yolo/yolo26n.pt"
@@ -204,7 +204,7 @@ class RuntimeConfig(BaseModel):
         default_factory=lambda: ["resource/example/idle-sentences.csv"]
     )
     history_max_sentences: int = 10
-    tts_model_path: str = "model/huggingface/hf_snapshots/Qwen__Qwen3-TTS-12Hz-0.6B-Base"
+    tts_model_path: str = "model/huggingface/hf_snapshots/fishaudio__fish-speech-1.5"
     tts_device_mode: str = "auto"
     tts_emotion_enabled: bool = True
     tts_clone_voice_enabled: bool = True
