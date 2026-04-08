@@ -258,11 +258,11 @@ class Brain:
         if self.config.tts_device_mode != "auto" or should_skip_tts_benchmark() or not profile.supports_startup_benchmark:
             return self._build_tts_runtime(selection_source=selection_source)
 
-        startup_reference = self._startup_tts_reference_pair()
+        benchmark_reference = self._benchmark_tts_reference_pair()
         selection = FishCloneTTS.benchmark_auto_profiles(
             self.config.tts_model_path,
-            startup_reference.audio_path,
-            startup_reference.text_path,
+            benchmark_reference.audio_path,
+            benchmark_reference.text_path,
             clone_voice_enabled=self.config.tts_clone_voice_enabled,
         )
         if selection is None:
@@ -912,6 +912,19 @@ class Brain:
         if not self.config.tts_clone_voice_enabled or self.config.tts_reference_mode == "fixed":
             return build_fixed_reference_pair(self.config.tts_ref_audio_path, self.config.tts_ref_text_path)
         return load_emotional_reference_pairs()[0]
+
+    def _benchmark_tts_reference_pair(self) -> ReferencePair:
+        fixed_pair = build_fixed_reference_pair(self.config.tts_ref_audio_path, self.config.tts_ref_text_path)
+        fixed_audio = Path(fixed_pair.audio_path)
+        fixed_text = Path(fixed_pair.text_path)
+        if fixed_audio.exists() and fixed_text.exists() and fixed_audio.suffix.lower() == ".wav":
+            return fixed_pair
+
+        bundled_pair = build_fixed_reference_pair("resource/voice/ref-voice3.wav", "resource/voice/transcript3.txt")
+        if Path(bundled_pair.audio_path).exists() and Path(bundled_pair.text_path).exists():
+            return bundled_pair
+
+        return self._startup_tts_reference_pair()
 
     async def _select_tts_reference_pair(self, text: str) -> ReferencePair:
         mode = (self.config.tts_reference_mode or "fixed").strip().lower()

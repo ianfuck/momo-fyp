@@ -949,6 +949,25 @@ def test_benchmark_candidate_subprocess_terminates_when_shutdown_requested(monke
     assert terminated["called"] is True
 
 
+def test_benchmark_tts_reference_pair_prefers_fixed_wav():
+    original_config = brain.config.model_copy(deep=True)
+    brain.config = original_config.model_copy(
+        update={
+            "tts_clone_voice_enabled": True,
+            "tts_reference_mode": "ollama_emotion",
+            "tts_ref_audio_path": "resource/voice/ref-voice3.wav",
+            "tts_ref_text_path": "resource/voice/transcript3.txt",
+        }
+    )
+
+    try:
+        pair = brain._benchmark_tts_reference_pair()
+        assert pair.audio_path == "resource/voice/ref-voice3.wav"
+        assert pair.text_path == "resource/voice/transcript3.txt"
+    finally:
+        brain.config = original_config
+
+
 def test_main_skip_tts_benchmark_sets_env_and_runs_uvicorn(monkeypatch):
     original = os.environ.get("MOMO_SKIP_TTS_BENCHMARK")
     called: dict[str, object] = {}

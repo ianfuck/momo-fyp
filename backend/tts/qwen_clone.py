@@ -815,6 +815,8 @@ def _benchmark_precision_modes(profile_key: str, device_mode: str) -> tuple[str,
             return ("float16", "float32")
         return ("float32",)
     if device_mode == "gpu":
+        if platform.system() == "Windows":
+            return ("float32",)
         return ("float16", "float32")
     if device_mode == "cpu":
         return ("bfloat16", "float32")
