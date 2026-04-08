@@ -28,7 +28,10 @@ class SemanticBenchmarkResult:
     semantic_dispatch_mode: str
     elapsed_ms: int
     ok: bool
+    preload_ms: int | None = None
+    synth_ms: int | None = None
     precision_mode: str | None = None
+    peak_vram_mb: float | None = None
     detail: str = ""
     ram_mb: float | None = None
     vram_mb: float | None = None

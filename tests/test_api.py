@@ -625,8 +625,11 @@ def test_prepare_runtime_models_recovers_from_tts_oom_via_benchmark(monkeypatch)
                 {
                     "name": "cpu",
                     "elapsed_ms": 123,
+                    "preload_ms": 80,
+                    "synth_ms": 43,
                     "device_mode": "cpu",
                     "precision_mode": "float32",
+                    "peak_vram_mb": 0.0,
                     "ram_mb": 10.0,
                     "vram_mb": 0.0,
                 },
@@ -639,8 +642,11 @@ def test_prepare_runtime_models_recovers_from_tts_oom_via_benchmark(monkeypatch)
                         "name": "cpu-float32",
                         "ok": True,
                         "elapsed_ms": 123,
+                        "preload_ms": 80,
+                        "synth_ms": 43,
                         "semantic_dispatch_mode": "single",
                         "precision_mode": "float32",
+                        "peak_vram_mb": 0.0,
                         "detail": "",
                     },
                 )()
@@ -696,7 +702,15 @@ def test_select_tts_runtime_uses_benchmark_when_auto(monkeypatch):
             self.result = type(
                 "Result",
                 (),
-                {"name": "semantic-auto-gpu-float32", "elapsed_ms": 321, "device_mode": "gpu", "precision_mode": "float32"},
+                {
+                    "name": "semantic-auto-gpu-float32",
+                    "elapsed_ms": 321,
+                    "preload_ms": 221,
+                    "synth_ms": 100,
+                    "device_mode": "gpu",
+                    "precision_mode": "float32",
+                    "peak_vram_mb": 1024.0,
+                },
             )()
             self.results = [
                 type(
@@ -706,8 +720,11 @@ def test_select_tts_runtime_uses_benchmark_when_auto(monkeypatch):
                         "name": "semantic-auto-gpu-float32",
                         "ok": True,
                         "elapsed_ms": 321,
+                        "preload_ms": 221,
+                        "synth_ms": 100,
                         "semantic_dispatch_mode": "auto",
                         "precision_mode": "float32",
+                        "peak_vram_mb": 1024.0,
                         "detail": "",
                     },
                 )()
@@ -725,7 +742,7 @@ def test_select_tts_runtime_uses_benchmark_when_auto(monkeypatch):
         assert brain.config.tts_device_mode == "gpu"
         assert brain.tts_runtime.selection_source == "benchmark"
         assert brain.tts_runtime.precision_mode == "float32"
-        assert any("TTS benchmark selected semantic-auto-gpu-float32" in item for item in brain.state.event_log)
+        assert any("TTS benchmark selected semantic-auto-gpu-float32 with synth 100 ms" in item for item in brain.state.event_log)
     finally:
         brain.tts = original_tts
         brain.config = original_config
@@ -794,7 +811,10 @@ def test_benchmark_auto_profiles_selects_best_isolated_candidate(monkeypatch):
                 semantic_dispatch_mode="single",
                 elapsed_ms=50,
                 ok=False,
+                preload_ms=None,
+                synth_ms=None,
                 precision_mode="float16",
+                peak_vram_mb=None,
                 detail="oom",
             )
         if plan.name == "gpu-float32":
@@ -802,9 +822,12 @@ def test_benchmark_auto_profiles_selects_best_isolated_candidate(monkeypatch):
                 name="gpu-float32",
                 device_mode="gpu",
                 semantic_dispatch_mode="single",
-                elapsed_ms=90,
+                elapsed_ms=190,
                 ok=True,
+                preload_ms=120,
+                synth_ms=70,
                 precision_mode="float32",
+                peak_vram_mb=900.0,
             )
         if plan.name == "semantic-auto-gpu-float16":
             return SemanticBenchmarkResult(
@@ -813,7 +836,10 @@ def test_benchmark_auto_profiles_selects_best_isolated_candidate(monkeypatch):
                 semantic_dispatch_mode="auto",
                 elapsed_ms=120,
                 ok=True,
+                preload_ms=20,
+                synth_ms=100,
                 precision_mode="float16",
+                peak_vram_mb=850.0,
             )
         if plan.name == "semantic-auto-gpu-float32":
             return SemanticBenchmarkResult(
@@ -822,7 +848,10 @@ def test_benchmark_auto_profiles_selects_best_isolated_candidate(monkeypatch):
                 semantic_dispatch_mode="auto",
                 elapsed_ms=150,
                 ok=True,
+                preload_ms=30,
+                synth_ms=120,
                 precision_mode="float32",
+                peak_vram_mb=930.0,
             )
         if plan.name == "cpu-bfloat16":
             return SemanticBenchmarkResult(
@@ -831,16 +860,22 @@ def test_benchmark_auto_profiles_selects_best_isolated_candidate(monkeypatch):
                 semantic_dispatch_mode="single",
                 elapsed_ms=1000,
                 ok=False,
+                preload_ms=None,
+                synth_ms=None,
                 precision_mode="bfloat16",
+                peak_vram_mb=None,
                 detail="unsupported",
             )
         return SemanticBenchmarkResult(
             name="cpu-float32",
             device_mode="cpu",
             semantic_dispatch_mode="single",
-            elapsed_ms=900,
+            elapsed_ms=90,
             ok=True,
+            preload_ms=10,
+            synth_ms=80,
             precision_mode="float32",
+            peak_vram_mb=0.0,
         )
 
     monkeypatch.setattr(qwen_module, "_run_benchmark_candidate_subprocess", fake_runner)
@@ -850,6 +885,7 @@ def test_benchmark_auto_profiles_selects_best_isolated_candidate(monkeypatch):
     assert selection is not None
     assert selection.result.name == "gpu-float32"
     assert selection.result.precision_mode == "float32"
+    assert selection.result.synth_ms == 70
     assert selection.tts.device_backend == "gpu"
     assert selection.tts.semantic_dispatch_mode == "single"
     assert selection.tts.precision_mode == "float32"

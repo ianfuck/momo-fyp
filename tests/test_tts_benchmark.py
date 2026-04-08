@@ -39,9 +39,12 @@ def test_benchmark_auto_profiles_logs_running_candidate(monkeypatch, capsys):
             name="gpu-float16",
             device_mode="gpu",
             semantic_dispatch_mode="single",
-            elapsed_ms=1200,
+            elapsed_ms=1600,
             ok=True,
+            preload_ms=200,
+            synth_ms=1400,
             precision_mode="float16",
+            peak_vram_mb=512.0,
         ),
         "gpu-float32": SemanticBenchmarkResult(
             name="gpu-float32",
@@ -49,7 +52,10 @@ def test_benchmark_auto_profiles_logs_running_candidate(monkeypatch, capsys):
             semantic_dispatch_mode="single",
             elapsed_ms=900,
             ok=True,
+            preload_ms=500,
+            synth_ms=400,
             precision_mode="float32",
+            peak_vram_mb=640.0,
         ),
     }
 
@@ -72,7 +78,10 @@ def test_benchmark_auto_profiles_logs_running_candidate(monkeypatch, capsys):
     assert selection.result.precision_mode == "float32"
     assert selection.tts.precision_mode == "float32"
     assert "[startup] tts benchmark running candidate=gpu-float16 device=gpu semantic=single precision=float16" in captured.out
-    assert "[startup] tts benchmark candidate=gpu-float32 status=ok elapsed_ms=900 semantic=single precision=float32" in captured.out
+    assert (
+        "[startup] tts benchmark candidate=gpu-float32 status=ok preload_ms=500 synth_ms=400 total_ms=900 "
+        "peak_vram_mb=640.0 semantic=single precision=float32"
+    ) in captured.out
 
 
 def test_qwen_benchmark_auto_profiles_uses_device_only_candidates(monkeypatch):
@@ -90,22 +99,28 @@ def test_qwen_benchmark_auto_profiles_uses_device_only_candidates(monkeypatch):
             semantic_dispatch_mode="single",
             elapsed_ms=800,
             ok=True,
+            preload_ms=100,
+            synth_ms=700,
             precision_mode="float16",
         ),
         "gpu-float32": SemanticBenchmarkResult(
             name="gpu-float32",
             device_mode="gpu",
             semantic_dispatch_mode="single",
-            elapsed_ms=700,
+            elapsed_ms=1400,
             ok=True,
+            preload_ms=1100,
+            synth_ms=300,
             precision_mode="float32",
         ),
         "cpu-float32": SemanticBenchmarkResult(
             name="cpu-float32",
             device_mode="cpu",
             semantic_dispatch_mode="single",
-            elapsed_ms=1400,
+            elapsed_ms=900,
             ok=True,
+            preload_ms=100,
+            synth_ms=800,
             precision_mode="float32",
         ),
     }

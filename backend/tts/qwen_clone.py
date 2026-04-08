@@ -303,7 +303,10 @@ class FishCloneTTS:
                 semantic_dispatch_mode="single",
                 elapsed_ms=0,
                 ok=True,
+                preload_ms=0,
+                synth_ms=0,
                 precision_mode=tts.precision_mode,
+                peak_vram_mb=None,
             )
             return TTSAutoBenchmarkSelection(tts=tts, result=result, results=[result])
         plans = benchmark_plans_for_current_host()
@@ -330,10 +333,12 @@ class FishCloneTTS:
             detail = f" detail={result.detail[:200]}" if result.detail else ""
             print(
                 f"[startup] tts benchmark candidate={result.name} status={'ok' if result.ok else 'error'} "
-                f"elapsed_ms={result.elapsed_ms} semantic={result.semantic_dispatch_mode} precision={result.precision_mode}{detail}",
+                f"preload_ms={result.preload_ms} synth_ms={result.synth_ms} total_ms={result.elapsed_ms} "
+                f"peak_vram_mb={result.peak_vram_mb} semantic={result.semantic_dispatch_mode} "
+                f"precision={result.precision_mode}{detail}",
                 flush=True,
             )
-            if result.ok and (best_result is None or result.elapsed_ms < best_result.elapsed_ms):
+            if result.ok and (best_result is None or _benchmark_sort_key(result) < _benchmark_sort_key(best_result)):
                 best_result = result
             results.append(result)
         if best_result is None:
@@ -736,7 +741,10 @@ def _run_benchmark_candidate_subprocess(
                             semantic_dispatch_mode=plan.semantic_dispatch_mode,
                             elapsed_ms=-1,
                             ok=False,
+                            preload_ms=None,
+                            synth_ms=None,
                             precision_mode=plan.precision_mode,
+                            peak_vram_mb=None,
                             detail=f"benchmark timed out after {timeout_sec} seconds",
                         )
                     time.sleep(_BENCHMARK_POLL_INTERVAL_SEC)
@@ -757,7 +765,10 @@ def _run_benchmark_candidate_subprocess(
             semantic_dispatch_mode=plan.semantic_dispatch_mode,
             elapsed_ms=-1,
             ok=False,
+            preload_ms=None,
+            synth_ms=None,
             precision_mode=plan.precision_mode,
+            peak_vram_mb=None,
             detail=detail[-1200:],
         )
     finally:
@@ -797,6 +808,12 @@ def _benchmark_precision_modes(profile_key: str, device_mode: str) -> tuple[str,
     if device_mode == "cpu":
         return ("bfloat16", "float32")
     return ("float32",)
+
+
+def _benchmark_sort_key(result: SemanticBenchmarkResult) -> tuple[float, int]:
+    synth_ms = float(result.synth_ms) if result.synth_ms is not None and result.synth_ms >= 0 else float("inf")
+    total_ms = result.elapsed_ms if result.elapsed_ms >= 0 else sys.maxsize
+    return synth_ms, total_ms
 
 
 def _default_precision_mode_for_device(device: str) -> str:

@@ -47,6 +47,41 @@ def get_system_stats(tmp_dir: str = "tmp") -> SystemStats:
     )
 
 
+def reset_peak_device_memory(device: str | None = None) -> None:
+    try:
+        import torch
+    except ImportError:
+        return
+
+    resolved = device or _preferred_runtime_device(torch)
+    if resolved is None:
+        return
+    if resolved.startswith("cuda") and torch.cuda.is_available():
+        index = int(resolved.split(":", 1)[1]) if ":" in resolved else 0
+        try:
+            torch.cuda.reset_peak_memory_stats(index)
+        except Exception:
+            return
+
+
+def peak_device_memory_mb(device: str | None = None) -> float | None:
+    try:
+        import torch
+    except ImportError:
+        return None
+
+    resolved = device or _preferred_runtime_device(torch)
+    if resolved is None:
+        return None
+    if resolved.startswith("cuda") and torch.cuda.is_available():
+        index = int(resolved.split(":", 1)[1]) if ":" in resolved else 0
+        try:
+            return round(float(torch.cuda.max_memory_reserved(index)) / (1024 * 1024), 2)
+        except Exception:
+            return _device_memory_mb(resolved)
+    return _device_memory_mb(resolved)
+
+
 def _device_memory_mb(device: str | None = None) -> float | None:
     try:
         import torch

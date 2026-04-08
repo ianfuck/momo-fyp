@@ -5,7 +5,12 @@ import json
 import time
 from pathlib import Path
 
-from backend.telemetry.system_stats import capture_process_footprint, diff_process_footprint
+from backend.telemetry.system_stats import (
+    capture_process_footprint,
+    diff_process_footprint,
+    peak_device_memory_mb,
+    reset_peak_device_memory,
+)
 from backend.tts.qwen_clone import FishCloneTTS, _BENCHMARK_REQUEST_OVERRIDES
 from backend.tts.semantic_runtime import SemanticBenchmarkResult
 
@@ -64,21 +69,36 @@ def run_candidate(
     started = time.monotonic()
     before = capture_process_footprint(candidate.device)
     try:
+        reset_peak_device_memory(candidate.device)
+        preload_started = time.monotonic()
         candidate.preload()
+        _synchronize_device(candidate.device)
+        preload_ms = int((time.monotonic() - preload_started) * 1000)
+        after_preload = capture_process_footprint(candidate.device)
+        synth_started = time.monotonic()
         candidate.synthesize(
             sample_text,
             f"tmp/tts_benchmark_{device_mode}_{semantic_dispatch_mode}.wav",
             request_overrides=_BENCHMARK_REQUEST_OVERRIDES,
         )
+        _synchronize_device(candidate.device)
+        synth_ms = int((time.monotonic() - synth_started) * 1000)
         after = capture_process_footprint(candidate.device)
         ram_mb, vram_mb = diff_process_footprint(before, after)
+        peak_vram_mb = peak_device_memory_mb(candidate.device)
+        if peak_vram_mb is None:
+            snapshots = [after_preload.vram_mb, after.vram_mb]
+            peak_vram_mb = max((value for value in snapshots if value is not None), default=None)
         return SemanticBenchmarkResult(
             name=plan_name,
             device_mode=device_mode,
             semantic_dispatch_mode=candidate.semantic_dispatch_mode,
             elapsed_ms=int((time.monotonic() - started) * 1000),
             ok=True,
+            preload_ms=preload_ms,
+            synth_ms=synth_ms,
             precision_mode=candidate.precision_mode,
+            peak_vram_mb=peak_vram_mb,
             ram_mb=ram_mb,
             vram_mb=vram_mb,
         )
@@ -89,9 +109,36 @@ def run_candidate(
             semantic_dispatch_mode=semantic_dispatch_mode,
             elapsed_ms=-1,
             ok=False,
+            preload_ms=None,
+            synth_ms=None,
             precision_mode=precision_mode,
+            peak_vram_mb=peak_device_memory_mb(candidate.device),
             detail=str(exc),
         )
+
+
+def _synchronize_device(device: str | None) -> None:
+    try:
+        import torch
+    except ImportError:
+        return
+
+    if device is None:
+        return
+    if device.startswith("cuda") and torch.cuda.is_available():
+        index = int(device.split(":", 1)[1]) if ":" in device else 0
+        try:
+            torch.cuda.synchronize(index)
+        except Exception:
+            return
+        return
+    if device == "mps":
+        synchronize = getattr(getattr(torch, "mps", None), "synchronize", None)
+        if callable(synchronize):
+            try:
+                synchronize()
+            except Exception:
+                return
 
 
 if __name__ == "__main__":

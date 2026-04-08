@@ -158,7 +158,8 @@ class Brain:
             self.config.tts_device_mode = selected_mode
             self.tts_benchmark_selected = selection.result.name
             self.tts_benchmark_results = [
-                f"{item.name}:{'ok' if item.ok else 'error'}:{item.elapsed_ms}:{item.semantic_dispatch_mode}:{item.precision_mode}"
+                f"{item.name}:{'ok' if item.ok else 'error'}:{item.preload_ms}:{item.synth_ms}:{item.elapsed_ms}:"
+                f"{item.peak_vram_mb}:{item.semantic_dispatch_mode}:{item.precision_mode}"
                 + (f":{item.detail}" if item.detail else "")
                 for item in selection.results
             ]
@@ -272,7 +273,8 @@ class Brain:
             return self._build_tts_runtime(selection_source=selection_source)
 
         self.state.event_log = [
-            f"TTS benchmark selected {selection.result.name} in {selection.result.elapsed_ms} ms.",
+            f"TTS benchmark selected {selection.result.name} with synth {selection.result.synth_ms} ms "
+            f"(preload {selection.result.preload_ms} ms, total {selection.result.elapsed_ms} ms).",
             *self.state.event_log,
         ][:20]
         return self._build_tts_runtime(selection, selection_source="benchmark")
