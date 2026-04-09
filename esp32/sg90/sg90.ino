@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <ESP32Servo.h>
+#include <FastLED.h> // 引入 FastLED 函式庫
 
 Servo leftServo;
 Servo rightServo;
@@ -10,10 +11,21 @@ constexpr int LED_LEFT_1_PIN = 25;
 constexpr int LED_LEFT_2_PIN = 26;
 constexpr int LED_RIGHT_1_PIN = 27;
 constexpr int LED_RIGHT_2_PIN = 33;
-// 已經不需要手動定義 Channel，因為 ESP32 Core 3.x 會自動管理通道
-constexpr int LED_PWM_FREQ = 5000;
-constexpr int LED_PWM_RESOLUTION = 8;
 constexpr int SERIAL_BAUD = 115200;
+
+// ================= FastLED 設定 =================
+#define NUM_LEDS 30       // ★請改成你每一條燈條實際的燈珠數量★
+#define LED_TYPE WS2812B  // ★請確認你的燈條型號，常見為 WS2812B 或 WS2811★
+#define COLOR_ORDER GRB   // 如果顏色顯示錯亂，請嘗試改為 RGB
+
+CRGB ledsLeft1[NUM_LEDS];
+CRGB ledsLeft2[NUM_LEDS];
+CRGB ledsRight1[NUM_LEDS];
+CRGB ledsRight2[NUM_LEDS];
+
+// 你想要顯示的顏色，預設為白色 (如果想改顏色，例如改為紅色: CRGB::Red)
+CRGB STRIP_COLOR = CRGB::White; 
+// ===============================================
 
 float currentLeft = 87.0f;
 float currentRight = 96.0f;
@@ -28,6 +40,7 @@ void applyServo(float leftDeg, float rightDeg) {
   rightServo.write(currentRight);
 }
 
+// 將 0.0~100.0 的百分比轉換為 0~255 的 FastLED 亮度值
 int brightnessPctToDuty(float pct) {
   return static_cast<int>(roundf(constrain(pct, 0.0f, 100.0f) * 255.0f / 100.0f));
 }
@@ -36,11 +49,18 @@ void applyLedBrightness(float leftPct, float rightPct) {
   currentLedLeftPct = constrain(leftPct, 0.0f, 100.0f);
   currentLedRightPct = constrain(rightPct, 0.0f, 100.0f);
   
-  // ESP32 Core 3.x 版本中，ledcWrite 的第一個參數是「腳位 (Pin)」，而非「通道」
-  ledcWrite(LED_LEFT_1_PIN, brightnessPctToDuty(currentLedLeftPct));
-  ledcWrite(LED_LEFT_2_PIN, brightnessPctToDuty(currentLedLeftPct));
-  ledcWrite(LED_RIGHT_1_PIN, brightnessPctToDuty(currentLedRightPct));
-  ledcWrite(LED_RIGHT_2_PIN, brightnessPctToDuty(currentLedRightPct));
+  // 取得 0-255 的亮度數值
+  uint8_t leftVal = brightnessPctToDuty(currentLedLeftPct);
+  uint8_t rightVal = brightnessPctToDuty(currentLedRightPct);
+
+  // 填滿燈條顏色，利用 % 運算子等比例縮放 CRGB 亮度 (0 為全暗，255 為最亮)
+  fill_solid(ledsLeft1, NUM_LEDS, STRIP_COLOR % leftVal);
+  fill_solid(ledsLeft2, NUM_LEDS, STRIP_COLOR % leftVal);
+  fill_solid(ledsRight1, NUM_LEDS, STRIP_COLOR % rightVal);
+  fill_solid(ledsRight2, NUM_LEDS, STRIP_COLOR % rightVal);
+
+  // 將資料送出到燈條
+  FastLED.show();
 }
 
 float extractFloatField(const String& line, const char* key, float fallback) {
@@ -83,11 +103,14 @@ void setup() {
   leftServo.attach(LEFT_PIN);
   rightServo.attach(RIGHT_PIN);
   
-  // 使用新的 ledcAttach 函式，一步完成腳位、頻率與解析度的設定 (取代原本的 setup + attachPin)
-  ledcAttach(LED_LEFT_1_PIN, LED_PWM_FREQ, LED_PWM_RESOLUTION);
-  ledcAttach(LED_LEFT_2_PIN, LED_PWM_FREQ, LED_PWM_RESOLUTION);
-  ledcAttach(LED_RIGHT_1_PIN, LED_PWM_FREQ, LED_PWM_RESOLUTION);
-  ledcAttach(LED_RIGHT_2_PIN, LED_PWM_FREQ, LED_PWM_RESOLUTION);
+  // 綁定 FastLED 腳位與陣列
+  FastLED.addLeds<LED_TYPE, LED_LEFT_1_PIN, COLOR_ORDER>(ledsLeft1, NUM_LEDS);
+  FastLED.addLeds<LED_TYPE, LED_LEFT_2_PIN, COLOR_ORDER>(ledsLeft2, NUM_LEDS);
+  FastLED.addLeds<LED_TYPE, LED_RIGHT_1_PIN, COLOR_ORDER>(ledsRight1, NUM_LEDS);
+  FastLED.addLeds<LED_TYPE, LED_RIGHT_2_PIN, COLOR_ORDER>(ledsRight2, NUM_LEDS);
+  
+  // 設定全域最高亮度 (0-255)，避免耗電過大可以調低
+  FastLED.setBrightness(255); 
   
   applyServo(90.0f, 90.0f);
   applyLedBrightness(0.0f, 0.0f);
@@ -104,14 +127,17 @@ void loop() {
         float right = extractFloatField(line, "right_deg", currentRight);
         float ledLeftPct = extractFloatField(line, "led_left_pct", currentLedLeftPct);
         float ledRightPct = extractFloatField(line, "led_right_pct", currentLedRightPct);
+        
         applyServo(left, right);
         applyLedBrightness(ledLeftPct, ledRightPct);
+        
         lastCommandAt = millis();
         sendStatus("ack", "track");
       }
     }
   }
 
+  // 若超過 3 秒沒有收到指令，回歸預設狀態並關閉燈光
   if (millis() - lastCommandAt > 3000) {
     applyServo(87.0f, 96.0f);
     applyLedBrightness(0.0f, 0.0f);

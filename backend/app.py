@@ -643,6 +643,8 @@ class Brain:
     def _compute_led_brightness_from_features(self, features) -> tuple[float, float]:
         midpoint_x = features.eye_midpoint[0] if features.eye_midpoint else features.center_x_norm
         midpoint_x = min(max(midpoint_x, 0.0), 1.0)
+        if self.config.servo_output_inverted:
+            midpoint_x = 1.0 - midpoint_x
         if self.config.led_left_right_inverted:
             midpoint_x = 1.0 - midpoint_x
 

@@ -1478,13 +1478,24 @@ def test_compute_led_brightness_tracks_midpoint_and_supports_inversion():
         assert normal_left == 74.0
         assert normal_right == 26.0
 
-        brain.config = brain.config.model_copy(update={"led_brightness_output_inverted": True})
+        brain.config = brain.config.model_copy(update={"servo_output_inverted": True})
+        servo_inverted_left, servo_inverted_right = brain._compute_led_brightness_from_features(features)
+        assert servo_inverted_left == 26.0
+        assert servo_inverted_right == 74.0
+
+        brain.config = brain.config.model_copy(
+            update={
+                "servo_output_inverted": False,
+                "led_brightness_output_inverted": True,
+            }
+        )
         inverted_left, inverted_right = brain._compute_led_brightness_from_features(features)
         assert inverted_left == 26.0
         assert inverted_right == 74.0
 
         brain.config = brain.config.model_copy(
             update={
+                "servo_output_inverted": False,
                 "led_brightness_output_inverted": False,
                 "led_left_right_inverted": True,
             }
