@@ -114,6 +114,8 @@ class ESP32Link:
         right_deg: float,
         mode: str = "track",
         tracking_source: str = "eye_midpoint",
+        led_left_pct: float = 50.0,
+        led_right_pct: float = 50.0,
     ) -> str:
         return json.dumps(
             {
@@ -121,14 +123,31 @@ class ESP32Link:
                 "mode": mode,
                 "left_deg": round(left_deg, 2),
                 "right_deg": round(right_deg, 2),
+                "led_left_pct": round(led_left_pct, 2),
+                "led_right_pct": round(led_right_pct, 2),
                 "tracking_source": tracking_source,
             },
             ensure_ascii=False,
             separators=(",", ":"),
         )
 
-    def send_servo_command(self, left_deg: float, right_deg: float, mode: str = "track", tracking_source: str = "eye_midpoint") -> str:
-        payload = self.build_servo_command(left_deg, right_deg, mode=mode, tracking_source=tracking_source)
+    def send_servo_command(
+        self,
+        left_deg: float,
+        right_deg: float,
+        mode: str = "track",
+        tracking_source: str = "eye_midpoint",
+        led_left_pct: float = 50.0,
+        led_right_pct: float = 50.0,
+    ) -> str:
+        payload = self.build_servo_command(
+            left_deg,
+            right_deg,
+            mode=mode,
+            tracking_source=tracking_source,
+            led_left_pct=led_left_pct,
+            led_right_pct=led_right_pct,
+        )
         with self._lock:
             if not self.connected:
                 self.refresh_connection()

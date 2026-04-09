@@ -196,3 +196,24 @@ def test_benchmark_precision_modes_keeps_windows_fish_float16(monkeypatch):
     assert qwen_clone._benchmark_precision_modes("fish-speech-1.5", "gpu") == ("float16", "float32")
     assert qwen_clone._benchmark_precision_modes("s1-mini", "gpu") == ("float16", "float32")
     assert qwen_clone._benchmark_precision_modes("qwen3-tts-12hz-0.6b-base", "gpu") == ("float16", "float32")
+
+
+def test_benchmark_precision_modes_keep_kokoro_and_melo_float32_only():
+    assert qwen_clone._benchmark_precision_modes("kokoro-82m-zh", "gpu") == ("float32",)
+    assert qwen_clone._benchmark_precision_modes("kokoro-82m-zh", "cpu") == ("float32",)
+    assert qwen_clone._benchmark_precision_modes("melotts-chinese", "gpu") == ("float32",)
+    assert qwen_clone._benchmark_precision_modes("melotts-chinese", "cpu") == ("float32",)
+
+
+def test_benchmark_candidates_skip_mps_for_kokoro_and_melo_on_macos(monkeypatch):
+    monkeypatch.setattr("backend.tts.qwen_clone.platform.system", lambda: "Darwin")
+    plans = [
+        SimpleNamespace(name="mps", device_mode="mps", semantic_dispatch_mode="single"),
+        SimpleNamespace(name="cpu", device_mode="cpu", semantic_dispatch_mode="single"),
+    ]
+
+    kokoro = qwen_clone._benchmark_candidates_for_profile("kokoro-82m-zh", plans)
+    melo = qwen_clone._benchmark_candidates_for_profile("melotts-chinese", plans)
+
+    assert [item.name for item in kokoro] == ["cpu-float32"]
+    assert [item.name for item in melo] == ["cpu-float32"]

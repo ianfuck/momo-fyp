@@ -512,11 +512,14 @@ class Brain:
         self.state.servo = servo
         if features.track_id is None:
             return
+        led_left_pct, led_right_pct = self._compute_led_brightness_from_features(features)
         self.serial.send_servo_command(
             servo.left_deg,
             servo.right_deg,
             mode="track",
             tracking_source=servo.tracking_source,
+            led_left_pct=led_left_pct,
+            led_right_pct=led_right_pct,
         )
 
     async def housekeeping_loop(self) -> None:
@@ -634,6 +637,23 @@ class Brain:
         )
         servo.tracking_source = tracking_source
         return servo
+
+    def _compute_led_brightness_from_features(self, features) -> tuple[float, float]:
+        midpoint_x = features.eye_midpoint[0] if features.eye_midpoint else features.center_x_norm
+        midpoint_x = min(max(midpoint_x, 0.0), 1.0)
+        if self.config.led_left_right_inverted:
+            midpoint_x = 1.0 - midpoint_x
+
+        brightness_span = self.config.led_max_brightness_pct - self.config.led_min_brightness_pct
+        left_pct = self.config.led_min_brightness_pct + ((1.0 - midpoint_x) * brightness_span)
+        right_pct = self.config.led_min_brightness_pct + (midpoint_x * brightness_span)
+
+        if self.config.led_brightness_output_inverted:
+            brightness_total = self.config.led_min_brightness_pct + self.config.led_max_brightness_pct
+            left_pct = brightness_total - left_pct
+            right_pct = brightness_total - right_pct
+
+        return round(min(max(left_pct, 0.0), 100.0), 2), round(min(max(right_pct, 0.0), 100.0), 2)
 
     def _apply_servo_output_calibration(
         self,
@@ -907,10 +927,17 @@ class Brain:
     async def _speak_line(self, text: str) -> None:
         self.state.set_pipeline_stage(PipelineStage.TTS)
         started = time.monotonic()
-        if self.config.tts_clone_voice_enabled:
+        profile = self._current_tts_model_profile()
+        clone_voice_active = self.config.tts_clone_voice_enabled and profile.supports_voice_clone
+        if clone_voice_active:
             reference_pair = await self._select_tts_reference_pair(text)
             self._apply_tts_reference_pair(reference_pair)
-        if self.config.tts_emotion_enabled and self._current_tts_model_profile().supports_structured_emotion:
+        else:
+            self.state.tts_reference_raw = None
+            self.state.tts_reference_pair = None
+            self.state.tts_reference_audio_path = None
+            self.state.tts_reference_text_path = None
+        if self.config.tts_emotion_enabled and profile.supports_structured_emotion:
             emotion_raw, emotion = await self._classify_tts_emotion(text)
             tts_text = self._apply_tts_emotion(text, emotion)
         else:
@@ -1243,9 +1270,12 @@ async def build_apply_checks(payload: dict, config: RuntimeConfig) -> list[dict[
     if changed & {"tts_model_path", "tts_device_mode", "tts_emotion_enabled", "tts_clone_voice_enabled", "tts_reference_mode", "tts_ref_audio_path", "tts_ref_text_path", "tts_timeout_sec"}:
         errors: list[str] = []
         model_path = Path(config.tts_model_path)
+        profile = resolve_tts_model_profile(config.tts_model_path)
+        clone_voice_active = config.tts_clone_voice_enabled and profile.supports_voice_clone
+        emotion_active = config.tts_emotion_enabled and profile.supports_structured_emotion
         if not model_path.exists():
             errors.append(f"missing model path: {model_path}")
-        if config.tts_clone_voice_enabled:
+        if clone_voice_active:
             if config.tts_reference_mode == "fixed":
                 ref_pair = build_fixed_reference_pair(config.tts_ref_audio_path, config.tts_ref_text_path)
                 if not Path(ref_pair.audio_path).exists():
@@ -1258,8 +1288,8 @@ async def build_apply_checks(payload: dict, config: RuntimeConfig) -> list[dict[
                 except Exception as exc:
                     errors.append(str(exc))
                 else:
-                    mode = "clone voice" if config.tts_clone_voice_enabled else "normal TTS"
-                    emotion_mode = "emotion on" if config.tts_emotion_enabled else "emotion off"
+                    mode = "clone voice" if clone_voice_active else "normal TTS"
+                    emotion_mode = "emotion on" if emotion_active else "emotion off"
                     checks.append(
                         {
                             "component": "tts",
@@ -1272,9 +1302,14 @@ async def build_apply_checks(payload: dict, config: RuntimeConfig) -> list[dict[
                     )
         if errors:
             checks.append({"component": "tts", "status": "error", "message": "; ".join(errors)})
-        elif config.tts_reference_mode == "fixed" or not config.tts_clone_voice_enabled:
-            mode = "clone voice" if config.tts_clone_voice_enabled else "normal TTS"
-            emotion_mode = "emotion on" if config.tts_emotion_enabled else "emotion off"
+        elif config.tts_reference_mode == "fixed" or not clone_voice_active:
+            mode = "clone voice" if clone_voice_active else "normal TTS"
+            emotion_mode = "emotion on" if emotion_active else "emotion off"
+            detail_suffix = ""
+            if config.tts_clone_voice_enabled and not profile.supports_voice_clone:
+                detail_suffix = f" {profile.display_name} does not support clone voice, so reference audio is ignored."
+            elif config.tts_emotion_enabled and not profile.supports_structured_emotion:
+                detail_suffix = f" {profile.display_name} does not use structured emotion tags."
             checks.append(
                 {
                     "component": "tts",
@@ -1282,6 +1317,7 @@ async def build_apply_checks(payload: dict, config: RuntimeConfig) -> list[dict[
                     "message": (
                         f"TTS ready in {mode}, {emotion_mode}, ref mode {config.tts_reference_mode}, "
                         f"device {config.tts_device_mode}. Timeout set to {config.tts_timeout_sec * 1000} ms."
+                        f"{detail_suffix}"
                     ),
                 }
             )

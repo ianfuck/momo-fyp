@@ -32,6 +32,10 @@ def test_device_mode_fields_expose_os_specific_enum():
     assert fields["tts_device_mode"].enum == ["auto", "cpu", accelerator]
     assert fields["ollama_device_mode"].enum == ["auto", "cpu", accelerator]
     assert fields["tts_reference_mode"].enum == ["fixed", "ollama_emotion", "random"]
+    assert fields["led_min_brightness_pct"].type == "float"
+    assert fields["led_max_brightness_pct"].type == "float"
+    assert fields["led_brightness_output_inverted"].type == "boolean"
+    assert fields["led_left_right_inverted"].type == "boolean"
 
 
 def test_tts_model_field_exposes_supported_model_options():
@@ -39,6 +43,8 @@ def test_tts_model_field_exposes_supported_model_options():
     fields = {field.key: field for field in build_field_catalog(config)}
 
     assert fields["tts_model_path"].enum == supported_tts_model_paths()
+    assert "model/huggingface/hf_snapshots/hexgrad__Kokoro-82M-v1.1-zh" in fields["tts_model_path"].enum
+    assert "model/huggingface/hf_snapshots/myshell-ai__MeloTTS-Chinese" in fields["tts_model_path"].enum
 
 
 def test_invalid_tts_reference_mode_detected():
@@ -47,6 +53,14 @@ def test_invalid_tts_reference_mode_detected():
     errors = validate_runtime_config(config)
 
     assert "tts_reference_mode must be one of ['fixed', 'ollama_emotion', 'random']" in errors
+
+
+def test_invalid_led_brightness_config_detected():
+    config = RuntimeConfig(led_min_brightness_pct=90, led_max_brightness_pct=10)
+
+    errors = validate_runtime_config(config)
+
+    assert "led_min_brightness_pct must be <= led_max_brightness_pct" in errors
 
 
 def test_ollama_client_cpu_mode_sets_num_gpu_zero():

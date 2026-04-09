@@ -347,6 +347,8 @@ function formatTtsModelLabel(value: string): string {
   if (value.includes("Qwen__Qwen3-TTS-12Hz-1.7B-Base")) return "Qwen3-TTS 1.7B Base";
   if (value.includes("fishaudio__fish-speech-1.5")) return "Fish Speech V1.5";
   if (value.includes("fishaudio__s1-mini")) return "Fish Audio S1 Mini";
+  if (value.includes("hexgrad__Kokoro-82M-v1.1-zh")) return "Kokoro-82M";
+  if (value.includes("myshell-ai__MeloTTS-Chinese")) return "MeloTTS";
   return value;
 }
 

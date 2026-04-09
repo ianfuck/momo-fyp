@@ -60,7 +60,7 @@ def _ensure_tts_model(target_path: str) -> dict[str, str]:
         from huggingface_hub.errors import GatedRepoError
     except ImportError as exc:
         raise RuntimeError(
-            "huggingface_hub is required to download Fish Audio TTS models"
+            "huggingface_hub is required to download TTS models"
         ) from exc
 
     try:

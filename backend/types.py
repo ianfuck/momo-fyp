@@ -205,11 +205,11 @@ class RuntimeConfig(BaseModel):
         default_factory=lambda: ["resource/example/idle-sentences.csv"]
     )
     history_max_sentences: int = 10
-    tts_model_path: str = "model/huggingface/hf_snapshots/Qwen__Qwen3-TTS-12Hz-0.6B-Base"
+    tts_model_path: str = "model/huggingface/hf_snapshots/myshell-ai__MeloTTS-Chinese"
     tts_device_mode: str = "auto"
     tts_emotion_enabled: bool = True
     tts_clone_voice_enabled: bool = True
-    tts_reference_mode: str = "fixed_pair"
+    tts_reference_mode: str = "ollama_emotion"
     tts_ref_audio_path: str = "resource/voice/ref-voice3.wav"
     tts_ref_text_path: str = "resource/voice/transcript3.txt"
     tts_timeout_sec: int = 300
@@ -231,6 +231,10 @@ class RuntimeConfig(BaseModel):
     servo_left_max_deg: float = 135.0
     servo_right_min_deg: float = 45.0
     servo_right_max_deg: float = 135.0
+    led_min_brightness_pct: float = 0.0
+    led_max_brightness_pct: float = 100.0
+    led_brightness_output_inverted: bool = False
+    led_left_right_inverted: bool = False
     servo_smoothing_alpha: float = 0.25
     servo_max_speed_deg_per_sec: float = 180.0
     idle_sentence_interval_ms: int = 15000

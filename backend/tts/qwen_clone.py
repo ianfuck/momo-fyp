@@ -26,6 +26,7 @@ import soundfile as sf
 from backend.device_utils import backend_label_for_device, get_tts_device
 from backend.runtime_shutdown import shutdown_requested
 from backend.tts.model_profiles import resolve_tts_model_profile
+from backend.tts.provider_runtimes import KokoroChineseTTS, MeloChineseTTS
 from backend.tts.qwen_runtime import QwenVoiceCloneTTS
 from backend.tts.semantic_runtime import (
     SemanticBenchmarkResult,
@@ -130,31 +131,54 @@ class FishCloneTTS:
         self.model_path = model_path
         self.ref_audio_path = ref_audio_path
         self.ref_text_path = ref_text_path
-        self.clone_voice_enabled = clone_voice_enabled
+        self.model_profile = resolve_tts_model_profile(model_path)
+        self.clone_voice_enabled = clone_voice_enabled and self.model_profile.supports_voice_clone
         self.semantic_dispatch_mode = semantic_dispatch_mode
         self.precision_mode = precision_mode or _default_precision_mode_for_device(get_tts_device(device_mode))
         self.loaded = False
         self._model_manager = None
         self._engine = None
         self._lock = threading.Lock()
-        self.model_profile = resolve_tts_model_profile(model_path)
         self._delegate = None
         self.available = Path(model_path).exists() and (
-            not clone_voice_enabled or (Path(ref_audio_path).exists() and Path(ref_text_path).exists())
+            not self.clone_voice_enabled or (Path(ref_audio_path).exists() and Path(ref_text_path).exists())
         )
         self.device = get_tts_device(device_mode)
         self.device_backend = backend_label_for_device(self.device)
-        if self.model_profile.key.startswith("qwen3-tts"):
+        if self.model_profile.runtime_family == "qwen":
             self._delegate = QwenVoiceCloneTTS(
                 model_path,
                 ref_audio_path,
                 ref_text_path,
-                clone_voice_enabled=clone_voice_enabled,
+                clone_voice_enabled=self.clone_voice_enabled,
                 device_mode=device_mode,
                 precision_mode=self.precision_mode,
             )
+        elif self.model_profile.runtime_family == "kokoro":
+            self._delegate = KokoroChineseTTS(
+                model_path,
+                ref_audio_path,
+                ref_text_path,
+                model_profile=self.model_profile,
+                clone_voice_enabled=self.clone_voice_enabled,
+                device_mode=device_mode,
+                precision_mode=self.precision_mode,
+            )
+        elif self.model_profile.runtime_family == "melo":
+            self._delegate = MeloChineseTTS(
+                model_path,
+                ref_audio_path,
+                ref_text_path,
+                model_profile=self.model_profile,
+                clone_voice_enabled=self.clone_voice_enabled,
+                device_mode=device_mode,
+                precision_mode=self.precision_mode,
+            )
+        if self._delegate is not None:
             self.device = self._delegate.device
             self.device_backend = self._delegate.device_backend
+            self.precision_mode = self._delegate.precision_mode
+            self.semantic_dispatch_mode = getattr(self._delegate, "semantic_dispatch_mode", self.semantic_dispatch_mode)
             self.available = self._delegate.available
 
     def set_reference_paths(self, ref_audio_path: str, ref_text_path: str) -> None:
@@ -311,8 +335,11 @@ class FishCloneTTS:
             )
             return TTSAutoBenchmarkSelection(tts=tts, result=result, results=[result])
         plans = benchmark_plans_for_current_host()
-        if profile.key.startswith("qwen3-tts"):
-            plans = [plan for plan in plans if plan.semantic_dispatch_mode == "single"]
+        if profile.runtime_family in {"qwen", "kokoro", "melo"}:
+            if profile.runtime_family == "qwen":
+                plans = [plan for plan in plans if plan.semantic_dispatch_mode == "single"]
+            else:
+                plans = [plan for plan in plans if plan.semantic_dispatch_mode == "single"]
         if not plans:
             return None
         results: list[SemanticBenchmarkResult] = []
@@ -797,6 +824,8 @@ def _benchmark_timeout_sec() -> int:
 def _benchmark_candidates_for_profile(profile_key: str, plans) -> list[TTSBenchmarkCandidate]:
     candidates: list[TTSBenchmarkCandidate] = []
     for plan in plans:
+        if platform.system() == "Darwin" and profile_key.startswith(("kokoro-82m", "melotts")) and plan.device_mode != "cpu":
+            continue
         for precision_mode in _benchmark_precision_modes(profile_key, plan.device_mode):
             candidates.append(
                 TTSBenchmarkCandidate(
@@ -813,6 +842,8 @@ def _benchmark_precision_modes(profile_key: str, device_mode: str) -> tuple[str,
     if profile_key.startswith("qwen3-tts"):
         if device_mode == "gpu":
             return ("float16", "float32")
+        return ("float32",)
+    if profile_key.startswith("kokoro-82m") or profile_key.startswith("melotts"):
         return ("float32",)
     if device_mode == "gpu":
         return ("float16", "float32")

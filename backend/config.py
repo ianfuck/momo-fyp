@@ -5,7 +5,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from backend.tts.model_profiles import supported_tts_model_paths
+from backend.tts.model_profiles import resolve_tts_model_profile, supported_tts_model_paths
 from backend.tts.reference_selection import build_fixed_reference_pair, load_emotional_reference_pairs
 from backend.types import ConfigField, RuntimeConfig
 
@@ -80,6 +80,10 @@ FIELD_DESCRIPTIONS: dict[str, tuple[str, str, str | None]] = {
     "servo_left_max_deg": ("Left Max", "Left servo upper clamp.", "0-180"),
     "servo_right_min_deg": ("Right Min", "Right servo lower clamp.", "0-180"),
     "servo_right_max_deg": ("Right Max", "Right servo upper clamp.", "0-180"),
+    "led_min_brightness_pct": ("LED Min", "Minimum LED brightness percentage sent to all four strips.", "0-100"),
+    "led_max_brightness_pct": ("LED Max", "Maximum LED brightness percentage sent to all four strips.", "0-100"),
+    "led_brightness_output_inverted": ("LED Invert", "Invert LED brightness output so 100% becomes 0% and 0% becomes 100%.", None),
+    "led_left_right_inverted": ("LED Swap Left/Right", "Swap left and right LED response to the tracked midpoint.", None),
     "servo_smoothing_alpha": ("Servo Smoothing", "One-pole smoothing factor for servo motion.", "0-1"),
     "servo_max_speed_deg_per_sec": ("Servo Max Speed", "Servo speed cap.", ">=1"),
     "idle_sentence_interval_ms": ("Idle Interval", "Interval between idle utterances.", ">=0"),
@@ -148,6 +152,10 @@ FIELD_GROUPS: dict[str, str] = {
     "servo_left_max_deg": "servo",
     "servo_right_min_deg": "servo",
     "servo_right_max_deg": "servo",
+    "led_min_brightness_pct": "servo",
+    "led_max_brightness_pct": "servo",
+    "led_brightness_output_inverted": "servo",
+    "led_left_right_inverted": "servo",
     "servo_smoothing_alpha": "servo",
     "servo_max_speed_deg_per_sec": "servo",
     "idle_sentence_interval_ms": "idle",
@@ -214,6 +222,7 @@ def _enum_for_field(key: str) -> list[str] | None:
 
 def validate_runtime_config(candidate: RuntimeConfig) -> list[str]:
     errors: list[str] = []
+    tts_profile = resolve_tts_model_profile(candidate.tts_model_path)
     if candidate.camera_width < 320:
         errors.append("camera_width must be >= 320")
     if candidate.camera_height < 240:
@@ -251,10 +260,16 @@ def validate_runtime_config(candidate: RuntimeConfig) -> list[str]:
         errors.append("servo_right_gain must be > 0")
     if candidate.servo_eye_spacing_cm < 1:
         errors.append("servo_eye_spacing_cm must be >= 1")
+    if not 0 <= candidate.led_min_brightness_pct <= 100:
+        errors.append("led_min_brightness_pct must be between 0 and 100")
+    if not 0 <= candidate.led_max_brightness_pct <= 100:
+        errors.append("led_max_brightness_pct must be between 0 and 100")
+    if candidate.led_min_brightness_pct > candidate.led_max_brightness_pct:
+        errors.append("led_min_brightness_pct must be <= led_max_brightness_pct")
     for path in candidate.tracking_examples_selected + candidate.idle_examples_selected:
         if not Path(path).exists():
             errors.append(f"example file not found: {path}")
-    if candidate.tts_clone_voice_enabled:
+    if candidate.tts_clone_voice_enabled and tts_profile.supports_voice_clone:
         if candidate.tts_reference_mode == "fixed":
             fixed_pair = build_fixed_reference_pair(candidate.tts_ref_audio_path, candidate.tts_ref_text_path)
             if not Path(fixed_pair.audio_path).exists():

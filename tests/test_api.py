@@ -13,6 +13,8 @@ from backend.app import app, brain
 from backend.tts.model_profiles import (
     FISH_AUDIO_S1_MINI_PROFILE,
     FISH_SPEECH_V1_5_PROFILE,
+    KOKORO_82M_ZH_PROFILE,
+    MELOTTS_CHINESE_PROFILE,
     QWEN3_TTS_0_6B_BASE_PROFILE,
     QWEN3_TTS_1_7B_BASE_PROFILE,
     resolve_tts_model_profile,
@@ -87,13 +89,21 @@ def test_browser_frame_upload_sends_servo_immediately():
     original_serial = brain.serial
     original_config = brain.config.model_copy(deep=True)
 
-    sent: list[tuple[float, float, str, str]] = []
+    sent: list[tuple[float, float, str, str, float, float]] = []
 
     class FakeSerial:
         connected = False
 
-        def send_servo_command(self, left_deg: float, right_deg: float, mode: str = "track", tracking_source: str = "eye_midpoint"):
-            sent.append((left_deg, right_deg, mode, tracking_source))
+        def send_servo_command(
+            self,
+            left_deg: float,
+            right_deg: float,
+            mode: str = "track",
+            tracking_source: str = "eye_midpoint",
+            led_left_pct: float = 50.0,
+            led_right_pct: float = 50.0,
+        ):
+            sent.append((left_deg, right_deg, mode, tracking_source, led_left_pct, led_right_pct))
             return "ok"
 
         def snapshot(self):
@@ -120,6 +130,7 @@ def test_browser_frame_upload_sends_servo_immediately():
         assert sent
         assert sent[0][2] == "track"
         assert sent[0][3] == "eye_midpoint"
+        assert sent[0][4] < sent[0][5]
     finally:
         brain.vision.submit_jpeg_frame = original_submit
         brain.serial = original_serial
@@ -130,13 +141,21 @@ def test_update_mode_attempts_send_even_when_serial_marked_disconnected():
     original_snapshot = brain.vision.get_snapshot
     original_serial = brain.serial
 
-    sent: list[tuple[float, float]] = []
+    sent: list[tuple[float, float, float, float]] = []
 
     class FakeSerial:
         connected = False
 
-        def send_servo_command(self, left_deg: float, right_deg: float, mode: str = "track", tracking_source: str = "eye_midpoint"):
-            sent.append((left_deg, right_deg))
+        def send_servo_command(
+            self,
+            left_deg: float,
+            right_deg: float,
+            mode: str = "track",
+            tracking_source: str = "eye_midpoint",
+            led_left_pct: float = 50.0,
+            led_right_pct: float = 50.0,
+        ):
+            sent.append((left_deg, right_deg, led_left_pct, led_right_pct))
             return "ok"
 
         def snapshot(self):
@@ -415,6 +434,33 @@ def test_update_config_accepts_servo_trim_and_gain():
         assert payload["applied_config"]["servo_right_trim_deg"] == -1.5
         assert payload["applied_config"]["servo_left_gain"] == 1.2
         assert payload["applied_config"]["servo_right_gain"] == 0.8
+    finally:
+        brain.config = original_config
+        brain.serial.close()
+        brain.serial = original_serial
+
+
+def test_update_config_accepts_led_output_controls():
+    original_config = brain.config.model_copy(deep=True)
+    original_serial = brain.serial
+    try:
+        brain.config = original_config.model_copy(update={"tts_reference_mode": "ollama_emotion"})
+        response = client.post(
+            "/api/config",
+            json={
+                "led_min_brightness_pct": 15,
+                "led_max_brightness_pct": 85,
+                "led_brightness_output_inverted": True,
+                "led_left_right_inverted": True,
+            },
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["validation_errors"] == []
+        assert payload["applied_config"]["led_min_brightness_pct"] == 15
+        assert payload["applied_config"]["led_max_brightness_pct"] == 85
+        assert payload["applied_config"]["led_brightness_output_inverted"] is True
+        assert payload["applied_config"]["led_left_right_inverted"] is True
     finally:
         brain.config = original_config
         brain.serial.close()
@@ -1337,6 +1383,45 @@ def test_compute_servo_trim_and_gain_affect_output():
         brain.config = original_config
 
 
+def test_compute_led_brightness_tracks_midpoint_and_supports_inversion():
+    original_config = brain.config.model_copy(deep=True)
+    try:
+        features = AudienceFeatures(
+            track_id=1,
+            bbox_area_ratio=0.35,
+            center_x_norm=0.5,
+            eye_midpoint=[0.2, 0.5],
+        )
+        brain.config = original_config.model_copy(
+            update={
+                "led_min_brightness_pct": 10.0,
+                "led_max_brightness_pct": 90.0,
+                "led_brightness_output_inverted": False,
+                "led_left_right_inverted": False,
+            }
+        )
+        normal_left, normal_right = brain._compute_led_brightness_from_features(features)
+        assert normal_left == 74.0
+        assert normal_right == 26.0
+
+        brain.config = brain.config.model_copy(update={"led_brightness_output_inverted": True})
+        inverted_left, inverted_right = brain._compute_led_brightness_from_features(features)
+        assert inverted_left == 26.0
+        assert inverted_right == 74.0
+
+        brain.config = brain.config.model_copy(
+            update={
+                "led_brightness_output_inverted": False,
+                "led_left_right_inverted": True,
+            }
+        )
+        swapped_left, swapped_right = brain._compute_led_brightness_from_features(features)
+        assert swapped_left == 26.0
+        assert swapped_right == 74.0
+    finally:
+        brain.config = original_config
+
+
 def test_snapshot_includes_serial_monitor(monkeypatch):
     from backend.types import SerialMonitorEntry, SerialMonitorSnapshot
 
@@ -1700,6 +1785,8 @@ def test_resolve_tts_model_profile_by_model_path():
     assert resolve_tts_model_profile("model/huggingface/hf_snapshots/fishaudio__s1-mini") == FISH_AUDIO_S1_MINI_PROFILE
     assert resolve_tts_model_profile("model/huggingface/hf_snapshots/Qwen__Qwen3-TTS-12Hz-0.6B-Base") == QWEN3_TTS_0_6B_BASE_PROFILE
     assert resolve_tts_model_profile("model/huggingface/hf_snapshots/Qwen__Qwen3-TTS-12Hz-1.7B-Base") == QWEN3_TTS_1_7B_BASE_PROFILE
+    assert resolve_tts_model_profile("model/huggingface/hf_snapshots/hexgrad__Kokoro-82M-v1.1-zh") == KOKORO_82M_ZH_PROFILE
+    assert resolve_tts_model_profile("model/huggingface/hf_snapshots/myshell-ai__MeloTTS-Chinese") == MELOTTS_CHINESE_PROFILE
 
 
 def test_speak_line_skips_structured_emotion_for_qwen_profile():
@@ -1740,6 +1827,60 @@ def test_speak_line_skips_structured_emotion_for_qwen_profile():
         brain.state.tts_emotion_applied = original_applied
         brain.state.tts_emotion_used = original_used
         brain.state.tts_input_text = original_input_text
+
+
+def test_speak_line_skips_reference_selection_for_non_clone_provider():
+    original_tts = brain.tts
+    original_config = brain.config.model_copy(deep=True)
+    original_select_reference = brain._select_tts_reference_pair
+    original_set_output = brain.audio.set_output_device
+    original_play = brain.audio.play
+    original_reference_raw = brain.state.tts_reference_raw
+    original_reference_pair = brain.state.tts_reference_pair
+    original_reference_audio = brain.state.tts_reference_audio_path
+    original_reference_text = brain.state.tts_reference_text_path
+
+    captured: dict[str, object] = {}
+
+    class FakeMeloTTS:
+        loaded = True
+        model_profile = MELOTTS_CHINESE_PROFILE
+
+        def synthesize(self, text: str, output_path: str) -> str:
+            captured["tts_text"] = text
+            return output_path
+
+    async def fail_select_reference(_: str):
+        raise AssertionError("reference selection should not run for MeloTTS")
+
+    brain.tts = FakeMeloTTS()
+    brain.config.tts_clone_voice_enabled = True
+    brain.config.tts_emotion_enabled = True
+    brain._select_tts_reference_pair = fail_select_reference
+    brain.audio.set_output_device = lambda *_: None
+    brain.audio.play = lambda wav_path, volume=1.0: wav_path
+    brain.state.tts_reference_raw = "stale"
+    brain.state.tts_reference_pair = "stale"
+    brain.state.tts_reference_audio_path = "stale.wav"
+    brain.state.tts_reference_text_path = "stale.txt"
+
+    try:
+        asyncio.run(brain._speak_line("測試台詞。"))
+        assert captured["tts_text"] == "測試台詞。"
+        assert brain.state.tts_reference_raw is None
+        assert brain.state.tts_reference_pair is None
+        assert brain.state.tts_reference_audio_path is None
+        assert brain.state.tts_reference_text_path is None
+    finally:
+        brain.tts = original_tts
+        brain.config = original_config
+        brain._select_tts_reference_pair = original_select_reference
+        brain.audio.set_output_device = original_set_output
+        brain.audio.play = original_play
+        brain.state.tts_reference_raw = original_reference_raw
+        brain.state.tts_reference_pair = original_reference_pair
+        brain.state.tts_reference_audio_path = original_reference_audio
+        brain.state.tts_reference_text_path = original_reference_text
 
 
 def test_polish_waveform_applies_fades_and_recenters() -> None:
