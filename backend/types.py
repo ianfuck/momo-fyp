@@ -224,8 +224,8 @@ class RuntimeConfig(BaseModel):
     servo_output_inverted: bool = False
     servo_left_trim_deg: float = 0.0
     servo_right_trim_deg: float = 0.0
-    servo_left_gain: float = 4.0
-    servo_right_gain: float = 4.0
+    servo_left_gain: float = 2.5
+    servo_right_gain: float = 2.5
     servo_eye_spacing_cm: int = 13
     servo_left_min_deg: float = 45.0
     servo_left_max_deg: float = 135.0
