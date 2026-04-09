@@ -49,6 +49,7 @@ class KokoroChineseTTS:
         *,
         model_profile: TTSModelProfile,
         clone_voice_enabled: bool = True,
+        voice: str | None = None,
         device_mode: str = "auto",
         precision_mode: str | None = None,
     ) -> None:
@@ -57,6 +58,7 @@ class KokoroChineseTTS:
         self.ref_text_path = ref_text_path
         self.clone_voice_enabled = False
         self.model_profile = model_profile
+        self.voice = voice or self.model_profile.default_voice
         self.loaded = False
         self._pipeline = None
         self._model = None
@@ -70,6 +72,9 @@ class KokoroChineseTTS:
     def set_reference_paths(self, ref_audio_path: str, ref_text_path: str) -> None:
         self.ref_audio_path = ref_audio_path
         self.ref_text_path = ref_text_path
+
+    def set_voice(self, voice: str) -> None:
+        self.voice = voice
 
     def preload(self) -> None:
         self._ensure_model()
@@ -92,9 +97,8 @@ class KokoroChineseTTS:
         self._ensure_model()
         output = Path(output_path)
         output.parent.mkdir(parents=True, exist_ok=True)
-        voice_path = Path(self.model_path) / "voices" / f"{self.model_profile.default_voice}.pt"
         segments: list[np.ndarray] = []
-        for result in self._pipeline(self._clean_text(text), voice=str(voice_path), split_pattern=r"\n+"):
+        for result in self._pipeline(self._clean_text(text), voice=self.voice, split_pattern=r"\n+"):
             audio = result.audio
             if audio is None:
                 continue

@@ -5,7 +5,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from backend.tts.model_profiles import resolve_tts_model_profile, supported_tts_model_paths
+from backend.tts.model_profiles import KOKORO_CHINESE_VOICES, resolve_tts_model_profile, supported_tts_model_paths
 from backend.tts.reference_selection import build_fixed_reference_pair, load_emotional_reference_pairs
 from backend.types import ConfigField, RuntimeConfig
 
@@ -51,6 +51,7 @@ FIELD_DESCRIPTIONS: dict[str, tuple[str, str, str | None]] = {
     "idle_examples_selected": ("Idle Examples", "CSV examples used for idle prompt generation.", None),
     "history_max_sentences": ("History Size", "History rollover limit. Fixed at 10 for MVP.", "10"),
     "tts_model_path": ("TTS Model", "Choose which installed TTS model to use.", None),
+    "tts_kokoro_voice": ("Kokoro Chinese Voice", "Chinese Kokoro voice id passed to the official `voice=` parameter.", None),
     "tts_device_mode": ("TTS Device", "Device mode for Fish TTS: auto, cpu, or accelerator for this OS.", None),
     "tts_emotion_enabled": ("TTS Emotion", "Let Ollama choose and apply an emotion tag for Fish TTS.", None),
     "tts_clone_voice_enabled": ("Clone Voice", "Use reference audio/text for Fish voice cloning. Turn off for normal TTS.", None),
@@ -127,6 +128,7 @@ FIELD_GROUPS: dict[str, str] = {
     "idle_examples_selected": "prompting",
     "history_max_sentences": "prompting",
     "tts_model_path": "tts",
+    "tts_kokoro_voice": "tts",
     "tts_device_mode": "tts",
     "tts_emotion_enabled": "tts",
     "tts_clone_voice_enabled": "tts",
@@ -169,7 +171,10 @@ FIELD_GROUPS: dict[str, str] = {
 def build_field_catalog(config: RuntimeConfig) -> list[ConfigField]:
     fields: list[ConfigField] = []
     defaults = RuntimeConfig()
+    tts_profile = resolve_tts_model_profile(config.tts_model_path)
     for key, field_info in RuntimeConfig.model_fields.items():
+        if key == "tts_kokoro_voice" and tts_profile.runtime_family != "kokoro":
+            continue
         label, description, valid_range = FIELD_DESCRIPTIONS.get(
             key,
             (key.replace("_", " ").title(), f"Runtime config for {key}.", None),
@@ -188,7 +193,7 @@ def build_field_catalog(config: RuntimeConfig) -> list[ConfigField]:
                 default=default,
                 value=value,
                 valid_range=valid_range,
-                enum=_enum_for_field(key),
+                enum=_enum_for_field(key, config),
                 applies_to=FIELD_GROUPS.get(key, "general"),
             )
         )
@@ -207,7 +212,7 @@ def _infer_type(value: object) -> str:
     return "string"
 
 
-def _enum_for_field(key: str) -> list[str] | None:
+def _enum_for_field(key: str, config: RuntimeConfig) -> list[str] | None:
     if key == "camera_source":
         return ["browser", "backend"]
     if key in {"yolo_device_mode", "tts_device_mode", "ollama_device_mode"}:
@@ -215,6 +220,8 @@ def _enum_for_field(key: str) -> list[str] | None:
         return ["auto", "cpu", accelerator]
     if key == "tts_model_path":
         return supported_tts_model_paths()
+    if key == "tts_kokoro_voice" and resolve_tts_model_profile(config.tts_model_path).runtime_family == "kokoro":
+        return list(KOKORO_CHINESE_VOICES)
     if key == "tts_reference_mode":
         return ["fixed", "ollama_emotion", "random"]
     return None
@@ -252,6 +259,13 @@ def validate_runtime_config(candidate: RuntimeConfig) -> list[str]:
         errors.append(f"ollama_device_mode must be one of {sorted(allowed_device_modes)}")
     if candidate.tts_reference_mode not in {"fixed", "ollama_emotion", "random"}:
         errors.append("tts_reference_mode must be one of ['fixed', 'ollama_emotion', 'random']")
+    if tts_profile.runtime_family == "kokoro":
+        if candidate.tts_kokoro_voice not in KOKORO_CHINESE_VOICES:
+            errors.append("tts_kokoro_voice must be one of the supported Kokoro Chinese voices")
+        elif Path(candidate.tts_model_path).exists():
+            voice_path = Path(candidate.tts_model_path) / "voices" / f"{candidate.tts_kokoro_voice}.pt"
+            if not voice_path.exists():
+                errors.append(f"tts_kokoro_voice file not found: {voice_path}")
     if candidate.history_max_sentences != 10:
         errors.append("history_max_sentences must be fixed at 10 for MVP")
     if candidate.servo_left_gain <= 0:

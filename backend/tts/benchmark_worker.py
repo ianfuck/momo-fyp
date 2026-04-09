@@ -27,6 +27,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--sample-text", required=True)
     parser.add_argument("--result-path", required=True)
     parser.add_argument("--clone-voice-enabled", action="store_true")
+    parser.add_argument("--kokoro-voice")
     args = parser.parse_args(argv)
 
     result = run_candidate(
@@ -38,6 +39,7 @@ def main(argv: list[str] | None = None) -> None:
         semantic_dispatch_mode=args.semantic_dispatch_mode,
         precision_mode=args.precision_mode,
         clone_voice_enabled=args.clone_voice_enabled,
+        kokoro_voice=args.kokoro_voice,
         sample_text=args.sample_text,
     )
     result_path = Path(args.result_path)
@@ -55,6 +57,7 @@ def run_candidate(
     semantic_dispatch_mode: str,
     precision_mode: str,
     clone_voice_enabled: bool,
+    kokoro_voice: str | None,
     sample_text: str,
 ) -> SemanticBenchmarkResult:
     candidate = FishCloneTTS(
@@ -62,6 +65,7 @@ def run_candidate(
         ref_audio_path,
         ref_text_path,
         clone_voice_enabled=clone_voice_enabled,
+        kokoro_voice=kokoro_voice,
         device_mode=device_mode,
         semantic_dispatch_mode=semantic_dispatch_mode,
         precision_mode=precision_mode,

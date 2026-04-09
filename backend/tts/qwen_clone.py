@@ -124,6 +124,7 @@ class FishCloneTTS:
         ref_audio_path: str,
         ref_text_path: str,
         clone_voice_enabled: bool = True,
+        kokoro_voice: str | None = None,
         device_mode: str = "auto",
         semantic_dispatch_mode: str = "single",
         precision_mode: str | None = None,
@@ -133,6 +134,7 @@ class FishCloneTTS:
         self.ref_text_path = ref_text_path
         self.model_profile = resolve_tts_model_profile(model_path)
         self.clone_voice_enabled = clone_voice_enabled and self.model_profile.supports_voice_clone
+        self.kokoro_voice = kokoro_voice or self.model_profile.default_voice
         self.semantic_dispatch_mode = semantic_dispatch_mode
         self.precision_mode = precision_mode or _default_precision_mode_for_device(get_tts_device(device_mode))
         self.loaded = False
@@ -161,6 +163,7 @@ class FishCloneTTS:
                 ref_text_path,
                 model_profile=self.model_profile,
                 clone_voice_enabled=self.clone_voice_enabled,
+                voice=self.kokoro_voice,
                 device_mode=device_mode,
                 precision_mode=self.precision_mode,
             )
@@ -191,6 +194,11 @@ class FishCloneTTS:
         self.available = Path(self.model_path).exists() and (
             not self.clone_voice_enabled or (Path(ref_audio_path).exists() and Path(ref_text_path).exists())
         )
+
+    def set_kokoro_voice(self, voice: str) -> None:
+        self.kokoro_voice = voice
+        if self._delegate is not None and hasattr(self._delegate, "set_voice"):
+            self._delegate.set_voice(voice)
 
     def preload(self) -> None:
         if self._delegate is not None:
@@ -310,6 +318,7 @@ class FishCloneTTS:
         ref_text_path: str,
         *,
         clone_voice_enabled: bool,
+        kokoro_voice: str | None = None,
         sample_text: str = "測試。",
     ) -> TTSAutoBenchmarkSelection | None:
         profile = resolve_tts_model_profile(model_path)
@@ -319,6 +328,7 @@ class FishCloneTTS:
                 ref_audio_path,
                 ref_text_path,
                 clone_voice_enabled=clone_voice_enabled,
+                kokoro_voice=kokoro_voice,
                 device_mode="auto",
                 precision_mode=None,
             )
@@ -356,6 +366,7 @@ class FishCloneTTS:
                 ref_audio_path=ref_audio_path,
                 ref_text_path=ref_text_path,
                 clone_voice_enabled=clone_voice_enabled,
+                kokoro_voice=kokoro_voice,
                 sample_text=sample_text,
             )
             detail = f" detail={result.detail[:200]}" if result.detail else ""
@@ -376,6 +387,7 @@ class FishCloneTTS:
             ref_audio_path,
             ref_text_path,
             clone_voice_enabled=clone_voice_enabled,
+            kokoro_voice=kokoro_voice,
             device_mode=best_result.device_mode,
             semantic_dispatch_mode=best_result.semantic_dispatch_mode,
             precision_mode=best_result.precision_mode,
@@ -715,6 +727,7 @@ def _run_benchmark_candidate_subprocess(
     ref_audio_path: str,
     ref_text_path: str,
     clone_voice_enabled: bool,
+    kokoro_voice: str | None = None,
     sample_text: str,
 ) -> SemanticBenchmarkResult:
     timeout_sec = _benchmark_timeout_sec()
@@ -748,6 +761,8 @@ def _run_benchmark_candidate_subprocess(
         ]
         if clone_voice_enabled:
             command.append("--clone-voice-enabled")
+        if kokoro_voice:
+            command.extend(["--kokoro-voice", kokoro_voice])
         popen_kwargs = {
             "stdin": subprocess.DEVNULL,
             "stdout": None,

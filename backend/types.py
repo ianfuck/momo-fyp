@@ -205,7 +205,8 @@ class RuntimeConfig(BaseModel):
         default_factory=lambda: ["resource/example/idle-sentences.csv"]
     )
     history_max_sentences: int = 10
-    tts_model_path: str = "model/huggingface/hf_snapshots/myshell-ai__MeloTTS-Chinese"
+    tts_model_path: str = "model/huggingface/hf_snapshots/hexgrad__Kokoro-82M-v1.1-zh"
+    tts_kokoro_voice: str = "zf_002"
     tts_device_mode: str = "auto"
     tts_emotion_enabled: bool = True
     tts_clone_voice_enabled: bool = True

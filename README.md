@@ -158,7 +158,10 @@ npm run build
   - `Fish Audio S1 Mini`: 用 S1 的完整固定 emotion tag 清單
 - 也支援 `model/huggingface/hf_snapshots/Qwen__Qwen3-TTS-12Hz-0.6B-Base` 與 `model/huggingface/hf_snapshots/Qwen__Qwen3-TTS-12Hz-1.7B-Base`。Qwen3-TTS 會直接走 `qwen-tts` runtime，不使用 Fish 的括號 emotion tag。
 - 也支援 `model/huggingface/hf_snapshots/hexgrad__Kokoro-82M-v1.1-zh` 與 `model/huggingface/hf_snapshots/myshell-ai__MeloTTS-Chinese`。
-  - `Kokoro-82M` 這個 option 會實際下載官方中文模型 `hexgrad/Kokoro-82M-v1.1-zh`，固定使用 `zf_001` 中文 voice。
+  - `Kokoro-82M` 這個 option 會實際下載官方中文模型 `hexgrad/Kokoro-82M-v1.1-zh`，並在 UI 顯示 `Kokoro Chinese Voice` 參數，直接對應官方 `voice=` 用法。
+  - 切到其他 TTS model 時，`Kokoro Chinese Voice` 不會出現在 UI，也不會被其他 provider 使用。
+  - 可選 Kokoro 中文音色如下：
+    `zf_001`, `zf_002`, `zf_003`, `zf_004`, `zf_005`, `zf_006`, `zf_007`, `zf_008`, `zf_017`, `zf_018`, `zf_019`, `zf_021`, `zf_022`, `zf_023`, `zf_024`, `zf_026`, `zf_027`, `zf_028`, `zf_032`, `zf_036`, `zf_038`, `zf_039`, `zf_040`, `zf_042`, `zf_043`, `zf_044`, `zf_046`, `zf_047`, `zf_048`, `zf_049`, `zf_051`, `zf_059`, `zf_060`, `zf_067`, `zf_070`, `zf_071`, `zf_072`, `zf_073`, `zf_074`, `zf_075`, `zf_076`, `zf_077`, `zf_078`, `zf_079`, `zf_083`, `zf_084`, `zf_085`, `zf_086`, `zf_087`, `zf_088`, `zf_090`, `zf_092`, `zf_093`, `zf_094`, `zf_099`, `zm_009`, `zm_010`, `zm_011`, `zm_012`, `zm_013`, `zm_014`, `zm_015`, `zm_016`, `zm_020`, `zm_025`, `zm_029`, `zm_030`, `zm_031`, `zm_033`, `zm_034`, `zm_035`, `zm_037`, `zm_041`, `zm_045`, `zm_050`, `zm_052`, `zm_053`, `zm_054`, `zm_055`, `zm_056`, `zm_057`, `zm_058`, `zm_061`, `zm_062`, `zm_063`, `zm_064`, `zm_065`, `zm_066`, `zm_068`, `zm_069`, `zm_080`, `zm_081`, `zm_082`, `zm_089`, `zm_091`, `zm_095`, `zm_096`, `zm_097`, `zm_098`, `zm_100`
   - `MeloTTS` 會使用 `myshell-ai/MeloTTS-Chinese` 的中文 speaker。
   - 這兩個 provider 都會直接生成中文語音，但不支援 reference voice clone，也不使用 Fish 的 structured emotion tag。
 - Fish TTS 情緒 tag 會固定包成 `({emotion})中文句子`，括號 tag 永遠放在最前面，避免只讀出 tag 本身。

@@ -4,14 +4,15 @@ from backend.config import build_field_catalog, validate_runtime_config
 from backend.types import RuntimeConfig
 from backend.llm.ollama_client import OllamaClient
 from backend.tts import semantic_runtime
-from backend.tts.model_profiles import supported_tts_model_paths
+from backend.tts.model_profiles import KOKORO_CHINESE_VOICES, supported_tts_model_paths
 
 
 def test_default_ollama_timeout_is_600():
     config = RuntimeConfig()
     assert config.ollama_timeout_sec == 600
     assert config.ollama_model == "qwen3.5:2b"
-    assert config.tts_model_path == "model/huggingface/hf_snapshots/Qwen__Qwen3-TTS-12Hz-0.6B-Base"
+    assert config.tts_model_path == "model/huggingface/hf_snapshots/hexgrad__Kokoro-82M-v1.1-zh"
+    assert config.tts_kokoro_voice == "zf_001"
     assert config.tts_reference_mode == "ollama_emotion"
 
 
@@ -45,6 +46,14 @@ def test_tts_model_field_exposes_supported_model_options():
     assert fields["tts_model_path"].enum == supported_tts_model_paths()
     assert "model/huggingface/hf_snapshots/hexgrad__Kokoro-82M-v1.1-zh" in fields["tts_model_path"].enum
     assert "model/huggingface/hf_snapshots/myshell-ai__MeloTTS-Chinese" in fields["tts_model_path"].enum
+    assert fields["tts_kokoro_voice"].enum == list(KOKORO_CHINESE_VOICES)
+
+
+def test_kokoro_voice_field_is_hidden_for_non_kokoro_model():
+    config = RuntimeConfig(tts_model_path="model/huggingface/hf_snapshots/Qwen__Qwen3-TTS-12Hz-0.6B-Base")
+    fields = {field.key: field for field in build_field_catalog(config)}
+
+    assert "tts_kokoro_voice" not in fields
 
 
 def test_invalid_tts_reference_mode_detected():
@@ -53,6 +62,14 @@ def test_invalid_tts_reference_mode_detected():
     errors = validate_runtime_config(config)
 
     assert "tts_reference_mode must be one of ['fixed', 'ollama_emotion', 'random']" in errors
+
+
+def test_invalid_kokoro_voice_detected():
+    config = RuntimeConfig(tts_kokoro_voice="bad_voice")
+
+    errors = validate_runtime_config(config)
+
+    assert "tts_kokoro_voice must be one of the supported Kokoro Chinese voices" in errors
 
 
 def test_invalid_led_brightness_config_detected():

@@ -243,6 +243,7 @@ class Brain:
             startup_reference.audio_path,
             startup_reference.text_path,
             clone_voice_enabled=self.config.tts_clone_voice_enabled,
+            kokoro_voice=self.config.tts_kokoro_voice,
             device_mode=self.config.tts_device_mode,
         )
         self.tts_runtime = RuntimeComponentStats(
@@ -325,6 +326,7 @@ class Brain:
             benchmark_reference.audio_path,
             benchmark_reference.text_path,
             clone_voice_enabled=self.config.tts_clone_voice_enabled,
+            kokoro_voice=self.config.tts_kokoro_voice,
         )
         if selection is None:
             self.state.event_log = [
@@ -1267,7 +1269,7 @@ async def build_apply_checks(payload: dict, config: RuntimeConfig) -> list[dict[
         except Exception as exc:
             checks.append({"component": "llm", "status": "error", "message": f"Ollama check failed: {exc}"})
 
-    if changed & {"tts_model_path", "tts_device_mode", "tts_emotion_enabled", "tts_clone_voice_enabled", "tts_reference_mode", "tts_ref_audio_path", "tts_ref_text_path", "tts_timeout_sec"}:
+    if changed & {"tts_model_path", "tts_kokoro_voice", "tts_device_mode", "tts_emotion_enabled", "tts_clone_voice_enabled", "tts_reference_mode", "tts_ref_audio_path", "tts_ref_text_path", "tts_timeout_sec"}:
         errors: list[str] = []
         model_path = Path(config.tts_model_path)
         profile = resolve_tts_model_profile(config.tts_model_path)
@@ -1318,6 +1320,11 @@ async def build_apply_checks(payload: dict, config: RuntimeConfig) -> list[dict[
                         f"TTS ready in {mode}, {emotion_mode}, ref mode {config.tts_reference_mode}, "
                         f"device {config.tts_device_mode}. Timeout set to {config.tts_timeout_sec * 1000} ms."
                         f"{detail_suffix}"
+                        + (
+                            f" Kokoro voice is {config.tts_kokoro_voice}."
+                            if profile.runtime_family == "kokoro"
+                            else ""
+                        )
                     ),
                 }
             )
@@ -1467,6 +1474,7 @@ async def update_config(payload: dict):
     brain.serial = ESP32Link(brain.config.serial_port, brain.config.serial_baud_rate)
     if changed_keys & {
         "tts_model_path",
+        "tts_kokoro_voice",
         "tts_device_mode",
         "tts_clone_voice_enabled",
         "tts_ref_audio_path",

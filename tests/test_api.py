@@ -1883,6 +1883,145 @@ def test_speak_line_skips_reference_selection_for_non_clone_provider():
         brain.state.tts_reference_text_path = original_reference_text
 
 
+def test_speak_line_uses_selected_kokoro_voice():
+    original_tts = brain.tts
+    original_config = brain.config.model_copy(deep=True)
+    original_set_output = brain.audio.set_output_device
+    original_play = brain.audio.play
+
+    captured: dict[str, object] = {}
+
+    class FakeKokoroTTS:
+        loaded = True
+        model_profile = KOKORO_82M_ZH_PROFILE
+
+        def set_voice(self, voice: str) -> None:
+            captured["voice"] = voice
+
+        def synthesize(self, text: str, output_path: str) -> str:
+            captured["tts_text"] = text
+            return output_path
+
+    brain.tts = FakeKokoroTTS()
+    brain.config = original_config.model_copy(update={"tts_kokoro_voice": "zm_010", "tts_emotion_enabled": True})
+    brain.audio.set_output_device = lambda *_: None
+    brain.audio.play = lambda wav_path, volume=1.0: wav_path
+    brain.tts.set_voice(brain.config.tts_kokoro_voice)
+
+    try:
+        asyncio.run(brain._speak_line("測試台詞。"))
+        assert captured["voice"] == "zm_010"
+        assert captured["tts_text"] == "測試台詞。"
+    finally:
+        brain.tts = original_tts
+        brain.config = original_config
+        brain.audio.set_output_device = original_set_output
+        brain.audio.play = original_play
+
+
+def test_update_config_kokoro_voice_change_rebuilds_tts_runtime(monkeypatch):
+    original_tts = brain.tts
+    original_config = brain.config.model_copy(deep=True)
+    original_select = brain._select_tts_runtime
+    original_reconfigure = brain.vision.reconfigure
+
+    selections: list[str] = []
+
+    class FakeTTS:
+        def __init__(self, voice: str) -> None:
+            self.voice = voice
+            self.ref_audio_path = "resource/voice/ref-voice3.wav"
+            self.ref_text_path = "resource/voice/transcript3.txt"
+            self.loaded = False
+            self.device = "cpu"
+            self.device_backend = "cpu"
+            self.semantic_dispatch_mode = "single"
+            self.model_profile = KOKORO_82M_ZH_PROFILE
+
+        def unload(self) -> None:
+            return None
+
+    brain.tts = FakeTTS("zf_001")
+    brain.config = original_config.model_copy(
+        update={
+            "tts_model_path": "model/huggingface/hf_snapshots/hexgrad__Kokoro-82M-v1.1-zh",
+            "tts_kokoro_voice": "zf_001",
+        }
+    )
+
+    monkeypatch.setattr(app_module, "should_prepare_models", lambda: False)
+
+    def fake_select_tts_runtime(selection_source: str):
+        selections.append(brain.config.tts_kokoro_voice)
+        return FakeTTS(brain.config.tts_kokoro_voice)
+
+    monkeypatch.setattr(brain, "_select_tts_runtime", fake_select_tts_runtime)
+    monkeypatch.setattr(brain.vision, "reconfigure", lambda *_: None)
+
+    try:
+        response = client.post("/api/config", json={"tts_kokoro_voice": "zm_010"})
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["validation_errors"] == []
+        assert payload["applied_config"]["tts_kokoro_voice"] == "zm_010"
+        assert selections == ["zm_010"]
+    finally:
+        brain.tts = original_tts
+        brain.config = original_config
+        brain._select_tts_runtime = original_select
+        brain.vision.reconfigure = original_reconfigure
+
+
+def test_update_config_hides_kokoro_voice_after_switching_model(monkeypatch):
+    original_config = brain.config.model_copy(deep=True)
+    original_tts = brain.tts
+    original_select = brain._select_tts_runtime
+    original_reconfigure = brain.vision.reconfigure
+
+    class FakeTTS:
+        def __init__(self, model_path: str) -> None:
+            self.model_path = model_path
+            self.ref_audio_path = "resource/voice/ref-voice3.wav"
+            self.ref_text_path = "resource/voice/transcript3.txt"
+            self.loaded = False
+            self.device = "cpu"
+            self.device_backend = "cpu"
+            self.semantic_dispatch_mode = "single"
+            self.model_profile = resolve_tts_model_profile(model_path)
+
+        def unload(self) -> None:
+            return None
+
+    brain.config = original_config.model_copy(
+        update={
+            "tts_model_path": "model/huggingface/hf_snapshots/hexgrad__Kokoro-82M-v1.1-zh",
+            "tts_kokoro_voice": "zm_010",
+        }
+    )
+    brain.tts = FakeTTS(brain.config.tts_model_path)
+
+    monkeypatch.setattr(app_module, "should_prepare_models", lambda: False)
+    monkeypatch.setattr(brain, "_select_tts_runtime", lambda selection_source: FakeTTS(brain.config.tts_model_path))
+    monkeypatch.setattr(brain.vision, "reconfigure", lambda *_: None)
+
+    try:
+        response = client.post(
+            "/api/config",
+            json={"tts_model_path": "model/huggingface/hf_snapshots/myshell-ai__MeloTTS-Chinese"},
+        )
+        assert response.status_code == 200
+        config_response = client.get("/api/config")
+        assert config_response.status_code == 200
+        field_keys = {field["key"] for field in config_response.json()["fields"]}
+        assert "tts_kokoro_voice" not in field_keys
+        assert brain.config.tts_kokoro_voice == "zm_010"
+    finally:
+        brain.config = original_config
+        brain.tts = original_tts
+        brain._select_tts_runtime = original_select
+        brain.vision.reconfigure = original_reconfigure
+
+
 def test_polish_waveform_applies_fades_and_recenters() -> None:
     tts = QwenCloneTTS("model", "voice.wav", "transcript.txt")
     wav = np.ones(2400, dtype=np.float32) * 0.5
