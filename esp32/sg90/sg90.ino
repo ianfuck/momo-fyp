@@ -18,8 +18,8 @@ constexpr int LED_PWM_FREQ = 5000;
 constexpr int LED_PWM_RESOLUTION = 8;
 constexpr int SERIAL_BAUD = 115200;
 
-float currentLeft = 93.0f;
-float currentRight = 85.0f;
+float currentLeft = 87.0f;
+float currentRight = 96.0f;
 float currentLedLeftPct = 0.0f;
 float currentLedRightPct = 0.0f;
 unsigned long lastCommandAt = 0;
@@ -115,7 +115,7 @@ void loop() {
   }
 
   if (millis() - lastCommandAt > 3000) {
-    applyServo(93.0f, 85.0f);
+    applyServo(87.0f, 96.0f);
     applyLedBrightness(0.0f, 0.0f);
   }
 }
