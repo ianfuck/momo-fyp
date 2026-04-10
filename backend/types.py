@@ -239,6 +239,7 @@ class RuntimeConfig(BaseModel):
     led_midpoint_response_gain: float = 1.0
     led_midpoint_response_gamma: float = 1.0
     led_midpoint_deadzone_norm: float = 0.0
+    led_signal_loss_fade_out_ms: int = 3000
     led_brightness_output_inverted: bool = False
     led_left_right_inverted: bool = False
     servo_smoothing_alpha: float = 0.25
