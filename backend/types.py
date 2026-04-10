@@ -236,6 +236,9 @@ class RuntimeConfig(BaseModel):
     servo_right_max_deg: float = 135.0
     led_min_brightness_pct: float = 0.0
     led_max_brightness_pct: float = 100.0
+    led_midpoint_response_gain: float = 1.0
+    led_midpoint_response_gamma: float = 1.0
+    led_midpoint_deadzone_norm: float = 0.0
     led_brightness_output_inverted: bool = False
     led_left_right_inverted: bool = False
     servo_smoothing_alpha: float = 0.25

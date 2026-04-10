@@ -648,6 +648,19 @@ class Brain:
         if self.config.led_left_right_inverted:
             midpoint_x = 1.0 - midpoint_x
 
+        centered_midpoint = (midpoint_x - 0.5) * 2.0
+        midpoint_sign = -1.0 if centered_midpoint < 0 else 1.0
+        midpoint_magnitude = abs(centered_midpoint)
+        deadzone = self.config.led_midpoint_deadzone_norm
+        if midpoint_magnitude <= deadzone:
+            midpoint_magnitude = 0.0
+        else:
+            midpoint_magnitude = (midpoint_magnitude - deadzone) / (1.0 - deadzone)
+
+        midpoint_magnitude = min(midpoint_magnitude * self.config.led_midpoint_response_gain, 1.0)
+        midpoint_magnitude = midpoint_magnitude ** self.config.led_midpoint_response_gamma
+        midpoint_x = 0.5 + ((midpoint_sign * midpoint_magnitude) / 2.0)
+
         brightness_span = self.config.led_max_brightness_pct - self.config.led_min_brightness_pct
         left_pct = self.config.led_min_brightness_pct + ((1.0 - midpoint_x) * brightness_span)
         right_pct = self.config.led_min_brightness_pct + (midpoint_x * brightness_span)
