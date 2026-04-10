@@ -192,7 +192,7 @@ class RuntimeConfig(BaseModel):
     ollama_model: str = "qwen3.5:2b"
     ollama_device_mode: str = "auto"
     llm_use_person_crop: bool = True
-    llm_liberation_mode: bool = False
+    llm_liberation_mode: bool = True
     ollama_timeout_sec: int = 600
     ollama_max_retries: int = 1
     tracking_examples_selected: list[str] = Field(
@@ -236,8 +236,8 @@ class RuntimeConfig(BaseModel):
     servo_right_max_deg: float = 135.0
     led_min_brightness_pct: float = 0.0
     led_max_brightness_pct: float = 100.0
-    led_midpoint_response_gain: float = 1.0
-    led_midpoint_response_gamma: float = 1.0
+    led_midpoint_response_gain: float = 2.5
+    led_midpoint_response_gamma: float = 0.75
     led_midpoint_deadzone_norm: float = 0.0
     led_signal_loss_fade_out_ms: int = 3000
     led_brightness_output_inverted: bool = False
