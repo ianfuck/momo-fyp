@@ -14,6 +14,7 @@ constexpr int LED_RIGHT_2_PIN = 33;
 constexpr int LED_ALWAYS_ON_1_PIN = 16;
 constexpr int LED_ALWAYS_ON_2_PIN = 17;
 constexpr int SERIAL_BAUD = 115200;
+constexpr unsigned long DEFAULT_LED_SIGNAL_LOSS_FADE_OUT_MS = 3000;
 
 // ================= NeoPixel 設定 =================
 #define NUM_LEDS 30  // ★請改成你每一條燈條實際的燈珠數量★
@@ -34,7 +35,10 @@ float currentLeft = 87.0f;
 float currentRight = 96.0f;
 float currentLedLeftPct = 0.0f;
 float currentLedRightPct = 0.0f;
+float lastCommandLedLeftPct = 0.0f;
+float lastCommandLedRightPct = 0.0f;
 unsigned long lastCommandAt = 0;
+unsigned long ledSignalLossFadeOutMs = DEFAULT_LED_SIGNAL_LOSS_FADE_OUT_MS;
 
 void applyServo(float leftDeg, float rightDeg) {
   currentLeft = constrain(leftDeg, 45.0f, 135.0f);
@@ -59,7 +63,7 @@ void fillStrip(Adafruit_NeoPixel& strip, uint8_t brightness) {
   strip.show();
 }
 
-void applyLedBrightness(float leftPct, float rightPct) {
+void renderLedBrightness(float leftPct, float rightPct) {
   currentLedLeftPct = constrain(leftPct, 0.0f, 100.0f);
   currentLedRightPct = constrain(rightPct, 0.0f, 100.0f);
   
@@ -73,6 +77,12 @@ void applyLedBrightness(float leftPct, float rightPct) {
   fillStrip(ledsRight2, rightVal);
   fillStrip(ledsAlwaysOn1, 255);
   fillStrip(ledsAlwaysOn2, 255);
+}
+
+void applyLedBrightness(float leftPct, float rightPct) {
+  lastCommandLedLeftPct = constrain(leftPct, 0.0f, 100.0f);
+  lastCommandLedRightPct = constrain(rightPct, 0.0f, 100.0f);
+  renderLedBrightness(lastCommandLedLeftPct, lastCommandLedRightPct);
 }
 
 float extractFloatField(const String& line, const char* key, float fallback) {
@@ -137,6 +147,8 @@ void loop() {
         float right = extractFloatField(line, "right_deg", currentRight);
         float ledLeftPct = extractFloatField(line, "led_left_pct", currentLedLeftPct);
         float ledRightPct = extractFloatField(line, "led_right_pct", currentLedRightPct);
+        ledSignalLossFadeOutMs = static_cast<unsigned long>(
+            max(0.0f, extractFloatField(line, "led_signal_loss_fade_out_ms", static_cast<float>(ledSignalLossFadeOutMs))));
         
         applyServo(left, right);
         applyLedBrightness(ledLeftPct, ledRightPct);
@@ -147,9 +159,14 @@ void loop() {
     }
   }
 
-  // 若超過 3 秒沒有收到指令，回歸預設狀態並關閉燈光
-  if (millis() - lastCommandAt > 3000) {
-    applyServo(87.0f, 96.0f);
-    applyLedBrightness(0.0f, 0.0f);
+  if (lastCommandAt > 0) {
+    unsigned long silentMs = millis() - lastCommandAt;
+    if (ledSignalLossFadeOutMs == 0 || silentMs >= ledSignalLossFadeOutMs) {
+      applyServo(87.0f, 96.0f);
+      renderLedBrightness(0.0f, 0.0f);
+    } else {
+      float fadeRatio = static_cast<float>(silentMs) / static_cast<float>(ledSignalLossFadeOutMs);
+      renderLedBrightness(lastCommandLedLeftPct * (1.0f - fadeRatio), lastCommandLedRightPct * (1.0f - fadeRatio));
+    }
   }
 }

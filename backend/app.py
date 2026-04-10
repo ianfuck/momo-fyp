@@ -522,6 +522,7 @@ class Brain:
             tracking_source=servo.tracking_source,
             led_left_pct=led_left_pct,
             led_right_pct=led_right_pct,
+            led_signal_loss_fade_out_ms=self.config.led_signal_loss_fade_out_ms,
         )
 
     async def housekeeping_loop(self) -> None:
@@ -1600,7 +1601,13 @@ async def get_ollama_models():
 
 @app.post("/api/control/recenter-servos")
 async def recenter_servos():
-    payload = brain.serial.send_servo_command(brain.config.servo_left_zero_deg, brain.config.servo_right_zero_deg, mode="idle_scan", tracking_source="manual")
+    payload = brain.serial.send_servo_command(
+        brain.config.servo_left_zero_deg,
+        brain.config.servo_right_zero_deg,
+        mode="idle_scan",
+        tracking_source="manual",
+        led_signal_loss_fade_out_ms=brain.config.led_signal_loss_fade_out_ms,
+    )
     return {"command": payload}
 
 

@@ -124,7 +124,7 @@ def test_build_servo_command_is_compact_for_esp32_parser(monkeypatch):
     link = ESP32Link("auto", 115200)
     try:
         payload = link.build_servo_command(100.24, 80.1)
-        assert payload == '{"type":"servo","mode":"track","left_deg":100.24,"right_deg":80.1,"led_left_pct":50.0,"led_right_pct":50.0,"tracking_source":"eye_midpoint"}'
+        assert payload == '{"type":"servo","mode":"track","left_deg":100.24,"right_deg":80.1,"led_left_pct":50.0,"led_right_pct":50.0,"led_signal_loss_fade_out_ms":3000,"tracking_source":"eye_midpoint"}'
     finally:
         link.close()
 
@@ -134,7 +134,17 @@ def test_build_servo_command_includes_led_brightness(monkeypatch):
     link = ESP32Link("auto", 115200)
     try:
         payload = link.build_servo_command(100.24, 80.1, led_left_pct=72.5, led_right_pct=27.5)
-        assert payload == '{"type":"servo","mode":"track","left_deg":100.24,"right_deg":80.1,"led_left_pct":72.5,"led_right_pct":27.5,"tracking_source":"eye_midpoint"}'
+        assert payload == '{"type":"servo","mode":"track","left_deg":100.24,"right_deg":80.1,"led_left_pct":72.5,"led_right_pct":27.5,"led_signal_loss_fade_out_ms":3000,"tracking_source":"eye_midpoint"}'
+    finally:
+        link.close()
+
+
+def test_build_servo_command_includes_led_signal_loss_fade_out_ms(monkeypatch):
+    monkeypatch.setattr("backend.serial.esp32_link.list_ports.comports", lambda: [])
+    link = ESP32Link("auto", 115200)
+    try:
+        payload = link.build_servo_command(100.24, 80.1, led_signal_loss_fade_out_ms=1800)
+        assert payload == '{"type":"servo","mode":"track","left_deg":100.24,"right_deg":80.1,"led_left_pct":50.0,"led_right_pct":50.0,"led_signal_loss_fade_out_ms":1800,"tracking_source":"eye_midpoint"}'
     finally:
         link.close()
 

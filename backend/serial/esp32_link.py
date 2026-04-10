@@ -116,6 +116,7 @@ class ESP32Link:
         tracking_source: str = "eye_midpoint",
         led_left_pct: float = 50.0,
         led_right_pct: float = 50.0,
+        led_signal_loss_fade_out_ms: int = 3000,
     ) -> str:
         return json.dumps(
             {
@@ -125,6 +126,7 @@ class ESP32Link:
                 "right_deg": round(right_deg, 2),
                 "led_left_pct": round(led_left_pct, 2),
                 "led_right_pct": round(led_right_pct, 2),
+                "led_signal_loss_fade_out_ms": int(max(0, led_signal_loss_fade_out_ms)),
                 "tracking_source": tracking_source,
             },
             ensure_ascii=False,
@@ -139,6 +141,7 @@ class ESP32Link:
         tracking_source: str = "eye_midpoint",
         led_left_pct: float = 50.0,
         led_right_pct: float = 50.0,
+        led_signal_loss_fade_out_ms: int = 3000,
     ) -> str:
         payload = self.build_servo_command(
             left_deg,
@@ -147,6 +150,7 @@ class ESP32Link:
             tracking_source=tracking_source,
             led_left_pct=led_left_pct,
             led_right_pct=led_right_pct,
+            led_signal_loss_fade_out_ms=led_signal_loss_fade_out_ms,
         )
         with self._lock:
             if not self.connected:

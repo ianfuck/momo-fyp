@@ -1,4 +1,5 @@
 import asyncio
+import platform
 import os
 import time
 from pathlib import Path
@@ -89,7 +90,7 @@ def test_browser_frame_upload_sends_servo_immediately():
     original_serial = brain.serial
     original_config = brain.config.model_copy(deep=True)
 
-    sent: list[tuple[float, float, str, str, float, float]] = []
+    sent: list[tuple[float, float, str, str, float, float, int]] = []
 
     class FakeSerial:
         connected = False
@@ -102,8 +103,9 @@ def test_browser_frame_upload_sends_servo_immediately():
             tracking_source: str = "eye_midpoint",
             led_left_pct: float = 50.0,
             led_right_pct: float = 50.0,
+            led_signal_loss_fade_out_ms: int = 3000,
         ):
-            sent.append((left_deg, right_deg, mode, tracking_source, led_left_pct, led_right_pct))
+            sent.append((left_deg, right_deg, mode, tracking_source, led_left_pct, led_right_pct, led_signal_loss_fade_out_ms))
             return "ok"
 
         def snapshot(self):
@@ -131,6 +133,7 @@ def test_browser_frame_upload_sends_servo_immediately():
         assert sent[0][2] == "track"
         assert sent[0][3] == "eye_midpoint"
         assert sent[0][4] < sent[0][5]
+        assert sent[0][6] == brain.config.led_signal_loss_fade_out_ms
     finally:
         brain.vision.submit_jpeg_frame = original_submit
         brain.serial = original_serial
@@ -141,7 +144,7 @@ def test_update_mode_attempts_send_even_when_serial_marked_disconnected():
     original_snapshot = brain.vision.get_snapshot
     original_serial = brain.serial
 
-    sent: list[tuple[float, float, float, float]] = []
+    sent: list[tuple[float, float, float, float, int]] = []
 
     class FakeSerial:
         connected = False
@@ -154,8 +157,9 @@ def test_update_mode_attempts_send_even_when_serial_marked_disconnected():
             tracking_source: str = "eye_midpoint",
             led_left_pct: float = 50.0,
             led_right_pct: float = 50.0,
+            led_signal_loss_fade_out_ms: int = 3000,
         ):
-            sent.append((left_deg, right_deg, led_left_pct, led_right_pct))
+            sent.append((left_deg, right_deg, led_left_pct, led_right_pct, led_signal_loss_fade_out_ms))
             return "ok"
 
         def snapshot(self):
@@ -476,12 +480,21 @@ def test_update_config_accepts_led_output_controls():
     original_config = brain.config.model_copy(deep=True)
     original_serial = brain.serial
     try:
-        brain.config = original_config.model_copy(update={"tts_reference_mode": "ollama_emotion"})
+        accelerator = "mps" if platform.system() == "Darwin" else "gpu"
+        brain.config = original_config.model_copy(
+            update={
+                "tts_reference_mode": "ollama_emotion",
+                "tts_device_mode": accelerator,
+                "yolo_device_mode": accelerator,
+                "ollama_device_mode": accelerator,
+            }
+        )
         response = client.post(
             "/api/config",
             json={
                 "led_min_brightness_pct": 15,
                 "led_max_brightness_pct": 85,
+                "led_signal_loss_fade_out_ms": 1800,
                 "led_brightness_output_inverted": True,
                 "led_left_right_inverted": True,
             },
@@ -491,6 +504,7 @@ def test_update_config_accepts_led_output_controls():
         assert payload["validation_errors"] == []
         assert payload["applied_config"]["led_min_brightness_pct"] == 15
         assert payload["applied_config"]["led_max_brightness_pct"] == 85
+        assert payload["applied_config"]["led_signal_loss_fade_out_ms"] == 1800
         assert payload["applied_config"]["led_brightness_output_inverted"] is True
         assert payload["applied_config"]["led_left_right_inverted"] is True
     finally:

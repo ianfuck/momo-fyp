@@ -89,6 +89,7 @@ FIELD_DESCRIPTIONS: dict[str, tuple[str, str, str | None]] = {
     "servo_right_max_deg": ("Right Max", "Right servo upper clamp.", "0-180"),
     "led_min_brightness_pct": ("LED Min", "Minimum LED brightness percentage sent to all four strips.", "0-100"),
     "led_max_brightness_pct": ("LED Max", "Maximum LED brightness percentage sent to all four strips.", "0-100"),
+    "led_signal_loss_fade_out_ms": ("LED Signal Loss Fade", "Fade-out time in milliseconds used by the ESP32 after serial tracking updates stop.", ">=0"),
     "led_brightness_output_inverted": ("LED Invert", "Invert LED brightness output so 100% becomes 0% and 0% becomes 100%.", None),
     "led_left_right_inverted": ("LED Swap Left/Right", "Swap left and right LED response to the tracked midpoint.", None),
     "servo_smoothing_alpha": ("Servo Smoothing", "One-pole smoothing factor for servo motion.", "0-1"),
@@ -164,6 +165,7 @@ FIELD_GROUPS: dict[str, str] = {
     "servo_right_max_deg": "servo",
     "led_min_brightness_pct": "servo",
     "led_max_brightness_pct": "servo",
+    "led_signal_loss_fade_out_ms": "servo",
     "led_brightness_output_inverted": "servo",
     "led_left_right_inverted": "servo",
     "servo_smoothing_alpha": "servo",
@@ -288,6 +290,8 @@ def validate_runtime_config(candidate: RuntimeConfig) -> list[str]:
         errors.append("led_max_brightness_pct must be between 0 and 100")
     if candidate.led_min_brightness_pct > candidate.led_max_brightness_pct:
         errors.append("led_min_brightness_pct must be <= led_max_brightness_pct")
+    if candidate.led_signal_loss_fade_out_ms < 0:
+        errors.append("led_signal_loss_fade_out_ms must be >= 0")
     for path in candidate.tracking_examples_selected + candidate.idle_examples_selected:
         if not Path(path).exists():
             errors.append(f"example file not found: {path}")
