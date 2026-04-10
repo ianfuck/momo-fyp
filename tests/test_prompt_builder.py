@@ -48,6 +48,44 @@ def test_tracking_prompt_visual_mode_uses_crop_instruction_instead_of_summary():
     assert prompt["required_terms"] == []
 
 
+def test_tracking_prompt_liberation_mode_keeps_system_prompt_and_simplifies_user_prompt():
+    builder = PromptBuilder(
+        "resource/md/system-persona_tracking.md",
+        "resource/md/system-persona_idle.md",
+    )
+    standard_prompt = builder.build_tracking_prompt(
+        sentence_index=2,
+        selected_examples=[
+            "resource/example/track-example-1.csv",
+            "resource/example/track-example-2.csv",
+        ],
+        audience=AudienceFeatures(top_color="粉色", height_class="short", build_class="slim", distance_class="near"),
+        event_summary="揮手",
+        reacquired=False,
+        use_visual_audience=True,
+    )
+    liberation_prompt = builder.build_tracking_prompt(
+        sentence_index=2,
+        selected_examples=[
+            "resource/example/track-example-1.csv",
+            "resource/example/track-example-2.csv",
+        ],
+        audience=AudienceFeatures(top_color="粉色", height_class="short", build_class="slim", distance_class="near"),
+        event_summary="揮手",
+        reacquired=False,
+        use_visual_audience=True,
+        liberation_mode=True,
+    )
+
+    assert liberation_prompt["system"] == standard_prompt["system"]
+    assert "解放模式" in liberation_prompt["user"]
+    assert "情緒瞬間爆開" in liberation_prompt["user"]
+    assert "crop 圖" in liberation_prompt["user"]
+    assert "即時事件: 揮手" in liberation_prompt["user"]
+    assert "reference 句" not in liberation_prompt["user"]
+    assert liberation_prompt["required_terms"] == []
+
+
 def test_sentence_validator():
     assert validate_generated_sentence("你好。", 22) == []
     assert validate_generated_sentence("", 22)

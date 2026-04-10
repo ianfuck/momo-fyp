@@ -9,6 +9,12 @@ export function RuntimeOverview({
   config: Record<string, unknown>;
   applyChecks: ConfigApplyCheck[];
 }) {
+  const llmPromptMode = Boolean(config.llm_liberation_mode)
+    ? "Liberation"
+    : Boolean(config.llm_use_person_crop)
+      ? "Person Crop + Image"
+      : "Prompt Only";
+
   return (
     <section className="panel">
       <div className="panel-header">
@@ -17,7 +23,7 @@ export function RuntimeOverview({
       </div>
       <div className="overview-grid">
         <RuntimeItem label="LLM Model" value={String(config.ollama_model ?? "-")} />
-        <RuntimeItem label="LLM Prompt Mode" value={Boolean(config.llm_use_person_crop) ? "Person Crop + Image" : "Prompt Only"} />
+        <RuntimeItem label="LLM Prompt Mode" value={llmPromptMode} />
         <RuntimeItem label="Ollama URL" value={String(config.ollama_base_url ?? "-")} />
         <RuntimeItem label="Camera Source" value={String(config.camera_source ?? "-")} />
         <RuntimeItem label="Camera Device" value={String(config.camera_device_id ?? "-")} />

@@ -192,6 +192,7 @@ class RuntimeConfig(BaseModel):
     ollama_model: str = "qwen3.5:2b"
     ollama_device_mode: str = "auto"
     llm_use_person_crop: bool = True
+    llm_liberation_mode: bool = False
     ollama_timeout_sec: int = 600
     ollama_max_retries: int = 1
     tracking_examples_selected: list[str] = Field(

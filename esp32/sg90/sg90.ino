@@ -11,6 +11,8 @@ constexpr int LED_LEFT_1_PIN = 25;
 constexpr int LED_LEFT_2_PIN = 26;
 constexpr int LED_RIGHT_1_PIN = 27;
 constexpr int LED_RIGHT_2_PIN = 33;
+constexpr int LED_ALWAYS_ON_1_PIN = 16;
+constexpr int LED_ALWAYS_ON_2_PIN = 17;
 constexpr int SERIAL_BAUD = 115200;
 
 // ================= FastLED 設定 =================
@@ -22,6 +24,8 @@ CRGB ledsLeft1[NUM_LEDS];
 CRGB ledsLeft2[NUM_LEDS];
 CRGB ledsRight1[NUM_LEDS];
 CRGB ledsRight2[NUM_LEDS];
+CRGB ledsAlwaysOn1[NUM_LEDS];
+CRGB ledsAlwaysOn2[NUM_LEDS];
 
 // 你想要顯示的顏色，預設為白色 (如果想改顏色，例如改為紅色: CRGB::Red)
 CRGB STRIP_COLOR = CRGB::White; 
@@ -58,6 +62,8 @@ void applyLedBrightness(float leftPct, float rightPct) {
   fill_solid(ledsLeft2, NUM_LEDS, STRIP_COLOR % leftVal);
   fill_solid(ledsRight1, NUM_LEDS, STRIP_COLOR % rightVal);
   fill_solid(ledsRight2, NUM_LEDS, STRIP_COLOR % rightVal);
+  fill_solid(ledsAlwaysOn1, NUM_LEDS, STRIP_COLOR);
+  fill_solid(ledsAlwaysOn2, NUM_LEDS, STRIP_COLOR);
 
   // 將資料送出到燈條
   FastLED.show();
@@ -108,6 +114,8 @@ void setup() {
   FastLED.addLeds<LED_TYPE, LED_LEFT_2_PIN, COLOR_ORDER>(ledsLeft2, NUM_LEDS);
   FastLED.addLeds<LED_TYPE, LED_RIGHT_1_PIN, COLOR_ORDER>(ledsRight1, NUM_LEDS);
   FastLED.addLeds<LED_TYPE, LED_RIGHT_2_PIN, COLOR_ORDER>(ledsRight2, NUM_LEDS);
+  FastLED.addLeds<LED_TYPE, LED_ALWAYS_ON_1_PIN, COLOR_ORDER>(ledsAlwaysOn1, NUM_LEDS);
+  FastLED.addLeds<LED_TYPE, LED_ALWAYS_ON_2_PIN, COLOR_ORDER>(ledsAlwaysOn2, NUM_LEDS);
   
   // 設定全域最高亮度 (0-255)，避免耗電過大可以調低
   FastLED.setBrightness(255); 

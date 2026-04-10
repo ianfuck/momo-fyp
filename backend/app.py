@@ -720,6 +720,7 @@ class Brain:
                 event_summary=self._event_summary(),
                 reacquired=self.state.mode == SystemMode.RECONNECTING or self.state.audience.actions.returned_after_defocus,
                 use_visual_audience=use_person_crop,
+                liberation_mode=self.config.llm_liberation_mode,
             )
             self.state.current_prompt_system = prompt["system"]
             self.state.current_prompt_user = prompt["user"]
@@ -781,6 +782,23 @@ class Brain:
         required_terms: list[str],
         images: list[bytes] | None = None,
     ) -> str:
+        if self.config.llm_liberation_mode:
+            return await asyncio.wait_for(
+                self._stream_text(
+                    client,
+                    system,
+                    prompt,
+                    {
+                        "num_predict": 48,
+                        "temperature": 0.55,
+                        "top_p": 0.9,
+                        "repeat_penalty": 1.15,
+                        "stop": ["\n\n", "\n- ", "</s>"],
+                    },
+                    images=images,
+                ),
+                timeout=self.config.ollama_timeout_sec,
+            )
         attempts = [
             {
                 "system": system,
@@ -1260,13 +1278,14 @@ async def build_apply_checks(payload: dict, config: RuntimeConfig) -> list[dict[
     if changed & {"yolo_model_path", "yolo_pose_model_path", "yolo_device_mode"}:
         checks.append({"component": "vision-model", "status": "ok", "message": f"YOLO model paths updated and verified. Device mode is {config.yolo_device_mode}."})
 
-    if changed & {"ollama_base_url", "ollama_model", "ollama_device_mode", "ollama_timeout_sec", "llm_use_person_crop"}:
+    if changed & {"ollama_base_url", "ollama_model", "ollama_device_mode", "ollama_timeout_sec", "llm_use_person_crop", "llm_liberation_mode"}:
         client = OllamaClient(config.ollama_base_url, min(config.ollama_timeout_sec, 15), config.ollama_device_mode)
         try:
             models = await client.list_models()
             if config.ollama_model in models:
-                mode = "person-crop image mode" if config.llm_use_person_crop else "prompt-only mode"
-                checks.append({"component": "llm", "status": "ok", "message": f"Ollama reachable and model {config.ollama_model} is available. LLM is in {mode}. Device mode is {config.ollama_device_mode}."})
+                prompt_mode = "person-crop image mode" if config.llm_use_person_crop else "prompt-only mode"
+                response_mode = "liberation mode" if config.llm_liberation_mode else "validated mode"
+                checks.append({"component": "llm", "status": "ok", "message": f"Ollama reachable and model {config.ollama_model} is available. LLM is in {prompt_mode} with {response_mode}. Device mode is {config.ollama_device_mode}."})
             else:
                 checks.append({"component": "llm", "status": "error", "message": f"Ollama reachable but model {config.ollama_model} was not found."})
         except Exception as exc:

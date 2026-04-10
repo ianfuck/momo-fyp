@@ -316,6 +316,38 @@ def test_generate_tracking_line_falls_back_when_person_crop_missing():
         brain.state.event_log = original_event_log
 
 
+def test_generate_validated_text_returns_first_output_in_liberation_mode():
+    original_config = brain.config.model_copy(deep=True)
+    original_stream = brain._stream_text
+
+    calls: list[tuple[str, str, dict, list[bytes] | None]] = []
+
+    async def fake_stream(client, system: str, prompt: str, options: dict, images=None):
+        calls.append((system, prompt, options, images))
+        return "手部微弱的顫動...你在恐懼未來，還是在渴望混亂？"
+
+    brain.config = original_config.model_copy(update={"llm_liberation_mode": True})
+    brain._stream_text = fake_stream
+
+    try:
+        text = asyncio.run(
+            brain._generate_validated_text(
+                client=None,
+                system="sys",
+                prompt="user",
+                limit=22,
+                required_terms=["手"],
+                images=[b"crop"],
+            )
+        )
+        assert text == "手部微弱的顫動...你在恐懼未來，還是在渴望混亂？"
+        assert len(calls) == 1
+        assert calls[0][3] == [b"crop"]
+    finally:
+        brain.config = original_config
+        brain._stream_text = original_stream
+
+
 def test_update_config_returns_apply_checks():
     response = client.post("/api/config", json={"camera_width": 640})
     assert response.status_code == 200

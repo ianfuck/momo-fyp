@@ -23,6 +23,7 @@ class PromptBuilder:
         event_summary: str,
         reacquired: bool,
         use_visual_audience: bool = False,
+        liberation_mode: bool = False,
     ) -> dict[str, str | list[str]]:
         stages = load_tracking_examples(selected_examples)
         stage_examples = stages.get(sentence_index, [])
@@ -50,6 +51,21 @@ class PromptBuilder:
             "7. 要保留 reference 的句型骨架、停頓位置、前半句與後半句的功能，再把內容替換成當前觀眾特徵與事件。\n"
             "8. 目標是和 reference 保持約 0.6 到 0.7 的相似度：像同一句的改寫版，不可完全照抄，也不可離得太遠。"
         )
+        if liberation_mode:
+            user_prompt = (
+                f"任務: 生成第 {sentence_index} 句追蹤台詞。\n"
+                "這次改成解放模式，不做 reference 改寫。\n"
+                f"{self._audience_input_line(audience, use_visual_audience)}\n"
+                f"即時事件: {event_summary or '無特殊事件'}\n"
+                "請緊跟著這張人像 crop 圖與即時事件做反應。\n"
+                "口氣要像情緒瞬間爆開，只說一句很少字數、可直接朗讀的話。\n"
+                "直接輸出台詞，不要解釋，不要前綴，不要補充說明。"
+            )
+            return {
+                "system": system_prompt,
+                "user": user_prompt,
+                "required_terms": [],
+            }
         user_prompt = (
             f"任務: 生成第 {sentence_index} 句追蹤台詞。\n"
             f"階段限制: 只能參考第 {sentence_index} 句 examples 的句法骨架、壓迫程度、觀察方向與節奏，不可跳段。\n"
