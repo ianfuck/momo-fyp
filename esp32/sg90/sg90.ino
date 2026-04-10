@@ -1,6 +1,6 @@
 #include <Arduino.h>
 #include <ESP32Servo.h>
-#include <FastLED.h> // 引入 FastLED 函式庫
+#include <Adafruit_NeoPixel.h>
 
 Servo leftServo;
 Servo rightServo;
@@ -15,21 +15,20 @@ constexpr int LED_ALWAYS_ON_1_PIN = 16;
 constexpr int LED_ALWAYS_ON_2_PIN = 17;
 constexpr int SERIAL_BAUD = 115200;
 
-// ================= FastLED 設定 =================
-#define NUM_LEDS 30       // ★請改成你每一條燈條實際的燈珠數量★
-#define LED_TYPE WS2812B  // ★請確認你的燈條型號，常見為 WS2812B 或 WS2811★
-#define COLOR_ORDER GRB   // 如果顏色顯示錯亂，請嘗試改為 RGB
+// ================= NeoPixel 設定 =================
+#define NUM_LEDS 30  // ★請改成你每一條燈條實際的燈珠數量★
 
-CRGB ledsLeft1[NUM_LEDS];
-CRGB ledsLeft2[NUM_LEDS];
-CRGB ledsRight1[NUM_LEDS];
-CRGB ledsRight2[NUM_LEDS];
-CRGB ledsAlwaysOn1[NUM_LEDS];
-CRGB ledsAlwaysOn2[NUM_LEDS];
+Adafruit_NeoPixel ledsLeft1(NUM_LEDS, LED_LEFT_1_PIN, NEO_GRB + NEO_KHZ800);
+Adafruit_NeoPixel ledsLeft2(NUM_LEDS, LED_LEFT_2_PIN, NEO_GRB + NEO_KHZ800);
+Adafruit_NeoPixel ledsRight1(NUM_LEDS, LED_RIGHT_1_PIN, NEO_GRB + NEO_KHZ800);
+Adafruit_NeoPixel ledsRight2(NUM_LEDS, LED_RIGHT_2_PIN, NEO_GRB + NEO_KHZ800);
+Adafruit_NeoPixel ledsAlwaysOn1(NUM_LEDS, LED_ALWAYS_ON_1_PIN, NEO_GRB + NEO_KHZ800);
+Adafruit_NeoPixel ledsAlwaysOn2(NUM_LEDS, LED_ALWAYS_ON_2_PIN, NEO_GRB + NEO_KHZ800);
 
-// 你想要顯示的顏色，預設為白色 (如果想改顏色，例如改為紅色: CRGB::Red)
-CRGB STRIP_COLOR = CRGB::White; 
-// ===============================================
+constexpr uint8_t STRIP_RED = 255;
+constexpr uint8_t STRIP_GREEN = 255;
+constexpr uint8_t STRIP_BLUE = 255;
+// ================================================
 
 float currentLeft = 87.0f;
 float currentRight = 96.0f;
@@ -44,9 +43,20 @@ void applyServo(float leftDeg, float rightDeg) {
   rightServo.write(currentRight);
 }
 
-// 將 0.0~100.0 的百分比轉換為 0~255 的 FastLED 亮度值
 int brightnessPctToDuty(float pct) {
   return static_cast<int>(roundf(constrain(pct, 0.0f, 100.0f) * 255.0f / 100.0f));
+}
+
+uint32_t scaledStripColor(Adafruit_NeoPixel& strip, uint8_t brightness) {
+  return strip.Color(
+      static_cast<uint8_t>((static_cast<uint16_t>(STRIP_RED) * brightness) / 255),
+      static_cast<uint8_t>((static_cast<uint16_t>(STRIP_GREEN) * brightness) / 255),
+      static_cast<uint8_t>((static_cast<uint16_t>(STRIP_BLUE) * brightness) / 255));
+}
+
+void fillStrip(Adafruit_NeoPixel& strip, uint8_t brightness) {
+  strip.fill(scaledStripColor(strip, brightness));
+  strip.show();
 }
 
 void applyLedBrightness(float leftPct, float rightPct) {
@@ -57,16 +67,12 @@ void applyLedBrightness(float leftPct, float rightPct) {
   uint8_t leftVal = brightnessPctToDuty(currentLedLeftPct);
   uint8_t rightVal = brightnessPctToDuty(currentLedRightPct);
 
-  // 填滿燈條顏色，利用 % 運算子等比例縮放 CRGB 亮度 (0 為全暗，255 為最亮)
-  fill_solid(ledsLeft1, NUM_LEDS, STRIP_COLOR % leftVal);
-  fill_solid(ledsLeft2, NUM_LEDS, STRIP_COLOR % leftVal);
-  fill_solid(ledsRight1, NUM_LEDS, STRIP_COLOR % rightVal);
-  fill_solid(ledsRight2, NUM_LEDS, STRIP_COLOR % rightVal);
-  fill_solid(ledsAlwaysOn1, NUM_LEDS, STRIP_COLOR);
-  fill_solid(ledsAlwaysOn2, NUM_LEDS, STRIP_COLOR);
-
-  // 將資料送出到燈條
-  FastLED.show();
+  fillStrip(ledsLeft1, leftVal);
+  fillStrip(ledsLeft2, leftVal);
+  fillStrip(ledsRight1, rightVal);
+  fillStrip(ledsRight2, rightVal);
+  fillStrip(ledsAlwaysOn1, 255);
+  fillStrip(ledsAlwaysOn2, 255);
 }
 
 float extractFloatField(const String& line, const char* key, float fallback) {
@@ -109,16 +115,12 @@ void setup() {
   leftServo.attach(LEFT_PIN);
   rightServo.attach(RIGHT_PIN);
   
-  // 綁定 FastLED 腳位與陣列
-  FastLED.addLeds<LED_TYPE, LED_LEFT_1_PIN, COLOR_ORDER>(ledsLeft1, NUM_LEDS);
-  FastLED.addLeds<LED_TYPE, LED_LEFT_2_PIN, COLOR_ORDER>(ledsLeft2, NUM_LEDS);
-  FastLED.addLeds<LED_TYPE, LED_RIGHT_1_PIN, COLOR_ORDER>(ledsRight1, NUM_LEDS);
-  FastLED.addLeds<LED_TYPE, LED_RIGHT_2_PIN, COLOR_ORDER>(ledsRight2, NUM_LEDS);
-  FastLED.addLeds<LED_TYPE, LED_ALWAYS_ON_1_PIN, COLOR_ORDER>(ledsAlwaysOn1, NUM_LEDS);
-  FastLED.addLeds<LED_TYPE, LED_ALWAYS_ON_2_PIN, COLOR_ORDER>(ledsAlwaysOn2, NUM_LEDS);
-  
-  // 設定全域最高亮度 (0-255)，避免耗電過大可以調低
-  FastLED.setBrightness(255); 
+  ledsLeft1.begin();
+  ledsLeft2.begin();
+  ledsRight1.begin();
+  ledsRight2.begin();
+  ledsAlwaysOn1.begin();
+  ledsAlwaysOn2.begin();
   
   applyServo(90.0f, 90.0f);
   applyLedBrightness(0.0f, 0.0f);
